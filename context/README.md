@@ -23,11 +23,12 @@ Run `npm ci` and `npm run dev` to preview. Use `npm run build` to check the prod
 
 ## Run the sponsor pump demo
 
-1. Copy `.env.example` to `.env.local` and set `TORQUE_MODE=live`. Add the Arcee API key, the Cognee Cloud API key and workspace API URL, and the SingleStore SQL host, database, username, and password. Use a demo database where that user can create tables, read, and insert. Set `SINGLESTORE_CA_PATH` if the cluster uses a CA bundle.
-2. Run `npm run seed:demo`. It loads the illustrative pump knowledge into Cognee and creates and seeds the `torque_pump_offers` and `torque_pump_orders` tables in SingleStore. The demo server also initializes its pump tables on first use.
-3. Start or restart `npm run dev`. Click **Pump runs, no water → Inspect water pump → Review order → Approve sandbox order**. The diagnosis should show **Arcee + Cognee**, the pump offers should show **SingleStore**, and the receipt should say **Saved in SingleStore**.
+1. Copy `.env.example` to `.env.local` and set `TORQUE_MODE=live`. Add the Cognee Cloud API key and workspace API URL and the SingleStore SQL host, database, username, and password. Use a demo database where the SQL user can create and alter tables, read, and insert. Set `SINGLESTORE_CA_PATH` if the cluster uses a CA bundle.
+2. In Persona, switch to **Sandbox**, create a Sandbox API key with permission to read inquiries, and create a test inquiry using a sample template such as KYC. Complete the sandbox flow with sample data and confirm the inquiry status is **Approved**. Add the key as `PERSONA_API_KEY` and the `inq_…` ID as `PERSONA_INQUIRY_ID` in `.env.local`. [Persona Sandbox setup](https://docs.withpersona.com/api-quickstart-tutorial) · [Test inquiry walkthrough](https://docs.withpersona.com/tutorial-embedded-flow-inquiry-template#step-7-test-the-flow)
+3. Run `npm run seed:demo`. It loads the illustrative pump knowledge into Cognee and creates or updates the `torque_pump_offers` and `torque_pump_orders` tables in SingleStore. The server also initializes its pump tables on first use.
+4. Start or restart `npm run dev`. Click **Pump runs, no water → Inspect water pump → Review order → Approve sandbox order**. Open the receipt’s audit trail to see the Cognee diagnosis, Persona Sandbox verification, and SingleStore receipt.
 
-The pump diagnosis queries Cognee and uses Arcee to rank candidates grounded in the result. SingleStore serves the fixture offers and stores approved pump orders and their audit records. The other prototype scenarios use local data. `TORQUE_MODE=mock` runs the same pump flow without sponsor credentials. Keep `.env.local` local.
+The pump diagnosis queries Cognee with the technician’s observation. Torque filters the candidate parts against the retrieved evidence and checks the shared water supply first. After the technician explicitly approves an order, Torque checks the configured test inquiry through Persona and stores the verification outcome with the sandbox order in SingleStore. The demo uses one preconfigured test technician. Other prototype scenarios use local data. `TORQUE_MODE=mock` runs the pump flow without sponsor credentials. Keep `.env.local` local.
 
 ## Repository map
 
@@ -38,6 +39,6 @@ The pump diagnosis queries Cognee and uses Arcee to rank candidates grounded in 
 | `parts.js` | Component names, descriptions, and catalog links |
 | `diagnostics.js` | Local symptom-to-cause rules and follow-up questions |
 | `offers.js` | Mock listings, fit and ranking logic, and sandbox orders |
-| `server/` | Demo API, Arcee and Cognee diagnosis, SingleStore pump catalog and order persistence |
+| `server/` | Demo API, Cognee-backed diagnosis, Persona Sandbox verification, and SingleStore pump catalog and order persistence |
 
 See [the three-minute demo](demo.md) and [the hackathon brief and sponsor notes](hackathon.md).

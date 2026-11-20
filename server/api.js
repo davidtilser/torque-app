@@ -2,6 +2,7 @@ import { diagnoseSymptom } from '../diagnostics.js';
 import { createSandboxOrder, getOffers, isValidZip } from '../offers.js';
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
+import { PersonaError } from './persona.js';
 import { createPumpStore } from './singlestore.js';
 
 const pumpKey = 'water-pump';
@@ -118,7 +119,7 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
         }
 
         assertConfigured();
-        upstream = 'Arcee or Cognee';
+        upstream = 'Cognee';
         diagnosis ??= factories.createLiveDiagnosis(env);
         sendJson(res, 200, await diagnosis.diagnose(symptom));
         return;
@@ -149,6 +150,10 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
 
       throw new ApiError(404, 'This Torque demo route does not exist.');
     } catch (error) {
+      if (error instanceof PersonaError) {
+        sendJson(res, error.statusCode, { error: error.message });
+        return;
+      }
       const status = error instanceof ApiError || [400, 409, 503].includes(error.statusCode) ? error.statusCode : 502;
       const message = status === 502 ? `${upstream} could not complete this request. Check the local terminal for details.` : error.message;
       if (status === 502) {

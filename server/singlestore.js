@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import singlestore from 'singlestore-nodejs/promise';
 import { getCatalog, isValidZip, quoteCatalog } from '../offers.js';
+import { createPersonaVerifier } from './persona.js';
 
 const pumpFixtures = getCatalog('water-pump');
 
@@ -62,10 +63,11 @@ function receipt(row) {
     fitReason: row.fit_reason,
     rejectedReason: row.rejected_reason,
     diagnosisSource: row.diagnosis_source,
+    personaStatus: row.persona_status,
   };
 }
 
-export function createPumpStore(env, { pool = openPool(env) } = {}) {
+export function createPumpStore(env, { pool = openPool(env), verifyTechnician = createPersonaVerifier(env) } = {}) {
   let initialization;
 
   async function initialize() {
@@ -98,9 +100,19 @@ export function createPumpStore(env, { pool = openPool(env) } = {}) {
         fit_reason VARCHAR(255) NOT NULL,
         rejected_reason VARCHAR(255),
         diagnosis_source VARCHAR(10),
+        persona_status VARCHAR(16),
         placed_at VARCHAR(24) NOT NULL
       )
     `);
+
+    const [personaColumn] = await pool.query(`SHOW COLUMNS FROM torque_pump_orders LIKE 'persona\\_status'`);
+    if (personaColumn.length === 0) {
+      try {
+        await pool.query('ALTER TABLE torque_pump_orders ADD COLUMN persona_status VARCHAR(16)');
+      } catch (error) {
+        if (error.errno !== 1060 && error.code !== 'ER_DUP_FIELDNAME') throw error;
+      }
+    }
 
     for (const listing of pumpFixtures.listings) {
       await pool.execute(`
@@ -175,6 +187,8 @@ export function createPumpStore(env, { pool = openPool(env) } = {}) {
     if (!offer?.compatible) throw storeError(409, 'This pump offer does not fit the machine.');
     if (!sameQuote(expectedQuote, offer)) throw storeError(409, 'This quote has changed. Review the current pump offer before approving.');
 
+    const personaStatus = await verifyTechnician();
+
     const orderId = `SBX-${randomUUID().slice(0, 8).toUpperCase()}`;
     const placedAt = new Date().toISOString();
     const totalCents = Math.round(offer.total * 100);
@@ -183,13 +197,13 @@ export function createPumpStore(env, { pool = openPool(env) } = {}) {
       const [insert] = await pool.execute(`
         INSERT INTO torque_pump_orders
           (request_id, order_id, offer_id, seller, title, part_number,
-           total_cents, zip, delivery_days, delivery_label, fit_reason, rejected_reason, diagnosis_source, placed_at)
-        SELECT ?, ?, offer_id, seller, title, part_number, price_cents + shipping_cents, ?, ?, ?, ?, ?, ?, ?
+           total_cents, zip, delivery_days, delivery_label, fit_reason, rejected_reason, diagnosis_source, persona_status, placed_at)
+        SELECT ?, ?, offer_id, seller, title, part_number, price_cents + shipping_cents, ?, ?, ?, ?, ?, ?, ?, ?
         FROM torque_pump_offers
         WHERE offer_id = ? AND part_number = ? AND price_cents + shipping_cents = ? AND base_delivery_days = ?
       `, [
         requestId, orderId, deliveryZip, offer.deliveryDays, offer.deliveryLabel,
-        offer.fitReason, pumpFixtures.mismatch, diagnosisSource, placedAt,
+        offer.fitReason, pumpFixtures.mismatch, diagnosisSource, personaStatus, placedAt,
         offer.id, offer.partNumber, totalCents, listings[0].deliveryDays,
       ]);
       quoteChanged = insert.affectedRows === 0;

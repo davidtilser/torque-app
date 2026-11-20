@@ -20,12 +20,12 @@ Torque is designed to let the technician provide observations and explicitly app
 
 ## Sponsor integration plan
 
-The sponsor demo uses three tools in the pump workflow. See [local setup](README.md#run-the-sponsor-pump-demo) for credentials and seeding.
+The pump workflow integrates three sponsor tools. See [local setup](README.md#run-the-sponsor-pump-demo) for credentials and seeding.
 
-| Tool | Intended role |
+| Tool | Role |
 | --- | --- |
-| Arcee | Rank candidate pump faults and choose checks based on the technician’s symptom and graph evidence. |
 | Cognee | Retrieve relationships between the symptom, checks, and modeled components from a seeded pump knowledge graph. |
+| Persona | Check the demo technician’s Sandbox verification status before saving the approved order. |
 | SingleStore | Read the pump catalog, recheck fit at approval, and save the sandbox order and audit record. |
 
 Firedrill was considered for a test that reproduces the wrong-variant purchase, then verifies that the agent excludes the incompatible offer after the fix. [Firedrill judging and event credits](https://discord.com/channels/1278435478609072198/1570734626828320819/1573372434244173925)

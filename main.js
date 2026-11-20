@@ -153,7 +153,7 @@ function renderDiagnosis(result) {
   const matched = result.status === 'matched';
   const heading = matched ? (result.causes.length ? 'Likely causes' : 'Next step') : 'A little more detail';
   diagnosisResult.dataset.source = result.source;
-  const source = result.source === 'live' ? 'Arcee + Cognee' : 'Mock diagnosis';
+  const source = result.source === 'live' ? 'Cognee' : 'Mock diagnosis';
   diagnosisResult.innerHTML = `
     <div class="diagnosis-heading">
       <span class="diagnosis-label">${graphic('sparkle')} ${source}</span>
@@ -340,7 +340,7 @@ async function loadOffers(part, request) {
 }
 
 function renderReceipt(part, order) {
-  const diagnosis = order.diagnosisSource === 'live' ? ' from an Arcee + Cognee diagnosis'
+  const diagnosis = order.diagnosisSource === 'live' ? ' from a Cognee-backed diagnosis'
     : order.diagnosisSource === 'mock' ? ' from a mock diagnosis' : '';
   content.innerHTML = `
     <div class="receipt" tabindex="-1" aria-live="polite">
@@ -359,6 +359,7 @@ function renderReceipt(part, order) {
           <li>${escapeHtml(order.fitReason)}</li>
           ${order.rejectedReason ? `<li>Excluded offer. ${escapeHtml(order.rejectedReason)}</li>` : ''}
           <li>Compared delivered price, ETA, and seller reviews for ZIP ${escapeHtml(order.zip)}.</li>
+          ${order.personaStatus === 'approved' ? '<li>Persona Sandbox confirmed the demo technician’s approved verification.</li>' : ''}
           <li>You approved the sandbox order for ${currency.format(order.total)}.</li>
         </ol>
       </details>
@@ -411,6 +412,7 @@ async function openCheckout() {
       <div><dt>Delivery to ${escapeHtml(zip)}</dt><dd>${escapeHtml(offer.deliveryLabel)}</dd></div>
       <div><dt>Total with shipping</dt><dd>${currency.format(offer.total)}</dd></div>
     </dl>
+    ${offerView.source === 'singlestore' ? '<p>Persona Sandbox checks the demo technician when you approve.</p>' : ''}
     <p class="checkout-sandbox">${graphic('shield')} Sandbox order · No payment will be taken</p>
     <p class="checkout-error" role="alert" hidden></p>
     <div class="dialog-buttons">
@@ -455,7 +457,7 @@ dialog.addEventListener('click', async (event) => {
     const message = dialog.querySelector('.checkout-error');
     submittingOrder = true;
     buttons.forEach((button) => { button.disabled = true; });
-    submit.textContent = 'Placing sandbox order…';
+    submit.textContent = offerView?.source === 'singlestore' ? 'Checking and placing order…' : 'Placing sandbox order…';
     message.hidden = true;
     try {
       const { offer, zip, offerKey, requestId } = checkout;

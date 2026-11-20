@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { createSandboxOrder, getOffers } from '../offers.js';
+import { getCatalog } from '../offers.js';
 import { createDemoApi } from './api.js';
 import { requiredLiveCredentials } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
+import { createPersonaVerifier } from './persona.js';
+import { createPumpStore } from './singlestore.js';
 
 const symptom = 'The pump makes a loud noise, but no water comes out of either group head.';
 const zip = '94105';
@@ -53,49 +55,91 @@ test('mock pump flow requires approval and rejects incompatible or stale quotes'
   assert.equal(first.data.id, replay.data.id);
 });
 
-test('live mode connects graph and model results to the SingleStore adapter', async () => {
+test('live checkout requires Persona approval and persists it with the sandbox order', async () => {
   const calls = [];
   const env = {
     ...Object.fromEntries(requiredLiveCredentials.map((key) => [key, 'fixture'])),
     TORQUE_MODE: 'live',
+    PERSONA_API_KEY: 'persona_sandbox_fixture',
+    PERSONA_INQUIRY_ID: 'inq_testTechnician',
+  };
+  let personaStatus = 'completed';
+  let saved;
+  const { listings } = getCatalog('water-pump');
+  const pool = {
+    async query() { return [[{ Field: 'persona_status' }]]; },
+    async execute(sql, params) {
+      if (sql.includes('INSERT IGNORE INTO torque_pump_offers')) return [{ affectedRows: 0 }];
+      if (sql.includes('FROM torque_pump_orders')) return [saved?.request_id === params[0] ? [saved] : []];
+      if (sql.includes('INSERT INTO torque_pump_orders')) {
+        calls.push('SingleStore sandbox write');
+        const [requestId, orderId, zip, deliveryDays, delivery, fit, rejected, diagnosis, persona, placed, offerId, partNumber, totalCents] = params;
+        saved = {
+          request_id: requestId, order_id: orderId, offer_id: offerId, zip,
+          delivery_days: deliveryDays, delivery_label: delivery, fit_reason: fit, rejected_reason: rejected,
+          diagnosis_source: diagnosis, persona_status: persona, placed_at: placed,
+          part_number: partNumber, total_cents: totalCents,
+        };
+        return [{ affectedRows: 1 }];
+      }
+      assert(sql.includes('FROM torque_pump_offers'));
+      if (params) return [listings.filter(({ id }) => id === params[0])];
+      calls.push('SingleStore read');
+      return [listings];
+    },
   };
   const api = createDemoApi(env, {
     createLiveDiagnosis: (config) => createLiveDiagnosis(config, {
-      fetch: async (url) => {
-        if (new URL(url).hostname.endsWith('cognee.ai')) {
-          calls.push('Cognee');
-          return Response.json([{ context_result: 'A water-pump or inlet-hose issue can affect both groups.' }]);
-        }
-        calls.push('Arcee');
-        return Response.json({ choices: [{ message: { content: '{"partIds":["water-pump","unverified-part"],"checkIds":["check-supply"]}' } }] });
+      fetch: async (url, { body }) => {
+        assert.equal(url, 'https://api.cognee.ai/api/v1/search');
+        assert(JSON.parse(body).query.includes(symptom));
+        calls.push('Cognee');
+        return Response.json([
+          { dataset_name: 'torque-pump-demo', context_result: 'A water-pump or inlet-hose issue can affect both groups.' },
+          { dataset_name: 'another-dataset', context_result: 'The solenoid-valve is stuck.' },
+        ]);
       },
     }),
-    createPumpStore: () => ({
-      getOffers(requestedZip, priority) {
-        calls.push('SingleStore read');
-        return getOffers(requestedZip, priority, 'water-pump');
-      },
-      createOrder(input) {
-        calls.push('SingleStore sandbox write');
-        assert.equal(input.diagnosisSource, 'live');
-        const offer = getOffers(input.zip, 'fastest', 'water-pump').find(({ id }) => id === input.offerId);
-        return createSandboxOrder(offer, input.zip, 'water-pump');
-      },
+    createPumpStore: (config) => createPumpStore(config, {
+      pool,
+      verifyTechnician: createPersonaVerifier(config, { fetch: async (url, { headers, redirect }) => {
+        assert.equal(url.origin, 'https://api.withpersona.com');
+        assert.equal(url.pathname, `/api/v1/inquiries/${env.PERSONA_INQUIRY_ID}`);
+        assert.equal(url.searchParams.get('fields[inquiry]'), 'status');
+        assert.equal(headers.Authorization, `Bearer ${env.PERSONA_API_KEY}`);
+        assert.equal(redirect, 'error');
+        calls.push('Persona Sandbox');
+        return Response.json({ data: { id: env.PERSONA_INQUIRY_ID, type: 'inquiry', attributes: { status: personaStatus } } });
+      } }),
     }),
   });
 
   const { data: diagnosis } = await request(api, 'POST', '/diagnose', { symptom });
   assert.equal(diagnosis.source, 'live');
-  assert.deepEqual(diagnosis.causes.flatMap((cause) => cause.partIds), ['water-pump', 'inlet-hose']);
+  assert.deepEqual(diagnosis.causes.flatMap((cause) => cause.partIds), ['inlet-hose', 'water-pump']);
+  assert.match(diagnosis.checks.at(-1), /confirm the failing component/);
   const { data: catalog } = await request(api, 'GET', `/offers?zip=${zip}`);
   assert.equal(catalog.source, 'singlestore');
   assert.equal(catalog.offers[2].compatible, false);
-  const { data: order } = await request(api, 'POST', '/orders', {
-    ...approval(catalog.offers[0]), diagnosisSource: diagnosis.source,
-  });
+  const purchase = { ...approval(catalog.offers[0]), diagnosisSource: diagnosis.source };
+  assert.equal((await request(api, 'POST', '/orders', { ...purchase, approved: false })).status, 400);
+  assert.equal((await request(api, 'POST', '/orders', approval(catalog.offers[2]))).status, 409);
+  const denied = await request(api, 'POST', '/orders', { ...purchase, personaStatus: 'approved' });
+  assert.equal(denied.status, 403);
+  assert.equal(saved, undefined);
+
+  personaStatus = 'approved';
+  const { data: order } = await request(api, 'POST', '/orders', purchase);
   assert.equal(order.source, 'singlestore');
   assert.equal(order.status, 'confirmed');
-  assert.deepEqual(calls, ['Cognee', 'Arcee', 'SingleStore read', 'SingleStore sandbox write']);
+  assert.equal(order.diagnosisSource, 'live');
+  assert.equal(order.personaStatus, 'approved');
+  assert.equal(saved.persona_status, 'approved');
+
+  personaStatus = 'declined';
+  const replay = await request(api, 'POST', '/orders', purchase);
+  assert.deepEqual(replay.data, order);
+  assert.deepEqual(calls, ['Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
 });
 
 test('live mode with missing credentials surfaces configuration without calling a sponsor', async () => {
@@ -105,5 +149,15 @@ test('live mode with missing credentials surfaces configuration without calling 
   assert.deepEqual(health.data, { mode: 'live', configured: false });
   const failed = await request(api, 'POST', '/diagnose', { symptom });
   assert.equal(failed.status, 503);
-  assert.match(failed.data.error, /ARCEE_API_KEY/);
+  assert.match(failed.data.error, /COGNEE_API_KEY/);
+});
+
+test('Persona rejects production credentials before contacting the provider', async () => {
+  let requested = false;
+  const verify = createPersonaVerifier({
+    PERSONA_API_KEY: 'persona_production_fixture',
+    PERSONA_INQUIRY_ID: 'inq_testTechnician',
+  }, { fetch: async () => { requested = true; } });
+  await assert.rejects(verify, { statusCode: 503 });
+  assert.equal(requested, false);
 });

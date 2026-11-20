@@ -1,5 +1,4 @@
 export const requiredLiveCredentials = [
-  'ARCEE_API_KEY',
   'COGNEE_API_KEY',
   'SINGLESTORE_HOST',
   'SINGLESTORE_DATABASE',
