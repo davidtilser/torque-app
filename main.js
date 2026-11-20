@@ -202,6 +202,7 @@ function renderDiagnosis(result) {
     </div>
     <h3 tabindex="-1">${heading}</h3>
     <p>${escapeHtml(result.summary)}</p>
+    ${matched && result.causes.length ? `<p class="fault-key"><span class="fault-dot fault-dot-primary"></span> Most likely <span class="fault-dot fault-dot-secondary"></span> Also check</p>` : ''}
     ${matched ? `
       <div class="cause-list">
         ${result.causes.map((cause) => `
@@ -222,6 +223,16 @@ function renderDiagnosis(result) {
     ` : `<div class="diagnosis-question">${escapeHtml(result.clarification)}</div>`}
   `;
   diagnosisResult.hidden = false;
+  highlightFaults(matched ? result.causes : []);
+}
+
+// Shows the diagnosis on the model: the first cause is the most likely one.
+function highlightFaults(causes) {
+  const known = (cause) => (cause?.partIds ?? []).filter((id) => Object.hasOwn(PART_BY_ID, id));
+  const primary = known(causes[0]);
+  const secondary = causes.slice(1).flatMap(known).filter((id) => !primary.includes(id));
+  viewer.setFaults({ primary, secondary });
+  if ([...primary, ...secondary].some((id) => PART_BY_ID[id].inside) && !machineOpen) setMachineOpen(true);
 }
 
 async function analyzeSymptom(symptom) {
@@ -271,6 +282,7 @@ diagnosisResult.addEventListener('click', (event) => {
     symptomInput.setCustomValidity('');
     diagnosisResult.hidden = true;
     symptomExamples.hidden = false;
+    viewer.setFaults();
     diagnosePanel.classList.remove('has-result');
     symptomInput.focus();
   }

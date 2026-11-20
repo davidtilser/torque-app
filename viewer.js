@@ -51,6 +51,15 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
     polygonOffsetUnits: -2,
     toneMapped: false,
   });
+  const faultMaterials = {
+    primary: selectionMaterial.clone(),
+    secondary: selectionMaterial.clone(),
+  };
+  faultMaterials.primary.color.set(0xff3b30);
+  faultMaterials.primary.opacity = 0.55;
+  faultMaterials.secondary.color.set(0xffb020);
+  faultMaterials.secondary.opacity = 0.4;
+  let faults = new Map();
   let hotspot;
 
   function clearHighlights() {
@@ -61,11 +70,11 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
   function showSelection() {
     hotspot?.setAttribute('aria-pressed', String(active === 'seal'));
     container.dataset.selectedPart = active ?? '';
-    if (!active) return;
-
     for (const mesh of pickMeshes) {
-      if (mesh.userData.partId !== active) continue;
-      const tint = new THREE.Mesh(mesh.geometry, selectionMaterial);
+      const partId = mesh.userData.partId;
+      const material = partId === active ? selectionMaterial : faultMaterials[faults.get(partId)];
+      if (!material) continue;
+      const tint = new THREE.Mesh(mesh.geometry, material);
       tint.renderOrder = 2;
       mesh.add(tint);
       highlights.push(tint);
@@ -75,6 +84,14 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
   function select(part) {
     if (active === part) return;
     active = part;
+    clearHighlights();
+    showSelection();
+  }
+
+  // Tints suspected parts: red for the most likely cause, amber for the others.
+  function setFaults({ primary = [], secondary = [] } = {}) {
+    faults = new Map([...secondary.map((id) => [id, 'secondary']), ...primary.map((id) => [id, 'primary'])]);
+    container.dataset.faultParts = primary.join(' ');
     clearHighlights();
     showSelection();
   }
@@ -120,7 +137,7 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   } catch {
     onAvailability?.(false);
-    return { reset() {}, select, setExpanded, setOpen };
+    return { reset() {}, select, setExpanded, setOpen, setFaults };
   }
 
   renderer.domElement.className = 'viewer-canvas';
@@ -279,5 +296,5 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
   }
 
   renderer.setAnimationLoop(animate);
-  return { reset, select, setExpanded, setOpen };
+  return { reset, select, setExpanded, setOpen, setFaults };
 }

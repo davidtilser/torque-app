@@ -269,3 +269,8 @@ dialog h2 { font-size: 23px; letter-spacing: -0.045em; }
 .catalog-reference p { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
 .catalog-reference small { display: block; margin-top: 3px; font-size: inherit; }
 .catalog-reference small:empty { display: none; }
+
+.fault-key { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; opacity: 0.8; }
+.fault-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.fault-dot-secondary { margin-left: 10px; background: #ffb020; }
+.fault-dot-primary { background: #ff3b30; }
