@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import singlestore from 'singlestore-nodejs/promise';
-import { getCatalog, isPumpVariant, isValidZip, pumpListings, quoteCatalog } from '../offers.js';
+import { catalogListings, getCatalog, isValidZip, quoteCatalog } from '../offers.js';
 import { createPersonaVerifier } from './persona.js';
-
-const pumpKey = 'water-pump';
-const pumpListingIds = pumpListings.map(({ id }) => id);
-const catalogPlaceholders = pumpListingIds.map(() => '?').join(', ');
 
 const catalogColumns = `
   offer_id AS id, seller, title, part_number AS partNumber, spec,
@@ -69,7 +65,7 @@ function receipt(row) {
   };
 }
 
-export function createPumpStore(env, { pool = openPool(env), verifyTechnician = createPersonaVerifier(env) } = {}) {
+export function createPartsStore(env, { pool = openPool(env), verifyTechnician = createPersonaVerifier(env) } = {}) {
   let initialization;
 
   async function initialize() {
@@ -116,17 +112,17 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
       }
     }
 
-    for (const listing of pumpListings) {
-      await pool.execute(`
-        INSERT IGNORE INTO torque_pump_offers
-          (offer_id, seller, title, part_number, spec, price_cents,
-           shipping_cents, rating, review_count, base_delivery_days)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        listing.id, listing.seller, listing.title, listing.partNumber, listing.spec,
-        listing.priceCents, listing.shippingCents, listing.rating, listing.reviewCount, listing.deliveryDays,
-      ]);
-    }
+    const fixtureRows = catalogListings.map((listing) => [
+      listing.id, listing.seller, listing.title, listing.partNumber, listing.spec,
+      listing.priceCents, listing.shippingCents, listing.rating, listing.reviewCount, listing.deliveryDays,
+    ]);
+    // These table names are kept so previously saved demo receipts stay available.
+    await pool.execute(`
+      INSERT IGNORE INTO torque_pump_offers
+        (offer_id, seller, title, part_number, spec, price_cents,
+         shipping_cents, rating, review_count, base_delivery_days)
+      VALUES ${fixtureRows.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+    `, fixtureRows.flat());
   }
 
   function seed() {
@@ -144,14 +140,16 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
     }, zip, priority);
   }
 
-  async function getOffers(zip, priority, variant) {
+  async function getOffers(zip, priority, partId, variant) {
     if (!isValidZip(zip)) throw storeError(400, 'Enter a five-digit ZIP code.');
-    if (!isPumpVariant(variant)) throw storeError(400, 'Choose a Silvia M nameplate variant.');
+    const catalog = getCatalog(partId, variant);
+    if (!catalog) throw storeError(400, 'Choose a Silvia M component and catalog variant.');
+    const listingIds = catalog.listings.map(({ id }) => id);
     await seed();
     const [listings] = await pool.execute(
-      `SELECT ${catalogColumns} FROM torque_pump_offers WHERE offer_id IN (${catalogPlaceholders})`, pumpListingIds,
+      `SELECT ${catalogColumns} FROM torque_pump_offers WHERE offer_id IN (${listingIds.map(() => '?').join(', ')})`, listingIds,
     );
-    return quotes(listings, zip, priority, getCatalog(pumpKey, variant));
+    return quotes(listings, zip, priority, catalog);
   }
 
   async function readOrder(requestId, offerId, zip, expectedQuote, diagnosisSource) {
@@ -168,23 +166,23 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
     return order;
   }
 
-  async function createOrder({ offerId, zip, requestId, variant, expectedQuote, diagnosisSource = null }) {
+  async function createOrder({ offerId, zip, requestId, partId, variant, expectedQuote, diagnosisSource = null }) {
     if (!isValidZip(zip)) throw storeError(400, 'Enter a five-digit ZIP code.');
     if (typeof offerId !== 'string' || !/^[a-z\d_-]{1,64}$/i.test(offerId)) {
-      throw storeError(400, 'Choose a replacement pump offer.');
+      throw storeError(400, 'Choose a replacement offer.');
     }
     if (typeof requestId !== 'string' || !/^[a-z\d_-]{1,128}$/i.test(requestId)) {
       throw storeError(400, 'A valid approval request ID is required.');
     }
     if (!expectedQuote || typeof expectedQuote.partNumber !== 'string' ||
       !Number.isFinite(expectedQuote.total) || !Number.isInteger(expectedQuote.deliveryDays)) {
-      throw storeError(400, 'Review the pump quote before approving.');
+      throw storeError(400, 'Review the replacement quote before approving.');
     }
 
-    const catalog = getCatalog(pumpKey, variant);
-    if (!catalog) throw storeError(400, 'Choose a Silvia M nameplate variant.');
-    if (!pumpListingIds.includes(offerId) || expectedQuote.partNumber !== catalog.partNumber) {
-      throw storeError(409, 'This pump offer does not match the selected Silvia M nameplate.');
+    const catalog = getCatalog(partId, variant);
+    if (!catalog) throw storeError(400, 'Choose a Silvia M component and catalog variant.');
+    if (!catalog.listings.some(({ id }) => id === offerId) || expectedQuote.partNumber !== catalog.partNumber) {
+      throw storeError(409, 'This offer does not match the selected Silvia M part.');
     }
 
     const deliveryZip = zip.trim();
@@ -194,8 +192,8 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
 
     const [listings] = await pool.execute(`SELECT ${catalogColumns} FROM torque_pump_offers WHERE offer_id = ?`, [offerId]);
     const [offer] = quotes(listings, deliveryZip, 'fastest', catalog);
-    if (!offer?.compatible) throw storeError(409, 'This pump offer does not fit the machine.');
-    if (!sameQuote(expectedQuote, offer)) throw storeError(409, 'This quote has changed. Review the current pump offer before approving.');
+    if (!offer?.compatible) throw storeError(409, 'This offer does not match the selected replacement.');
+    if (!sameQuote(expectedQuote, offer)) throw storeError(409, 'This quote has changed. Review the current offer before approving.');
 
     const personaStatus = await verifyTechnician();
 
@@ -223,7 +221,7 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
 
     const stored = await readOrder(requestId, offerId, deliveryZip, expectedQuote, diagnosisSource);
     if (stored) return stored;
-    if (quoteChanged) throw storeError(409, 'This quote has changed. Review the current pump offer before approving.');
+    if (quoteChanged) throw storeError(409, 'This quote has changed. Review the current offer before approving.');
     throw storeError(503, 'Could not confirm the saved sandbox order.');
   }
 

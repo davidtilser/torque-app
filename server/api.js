@@ -1,10 +1,10 @@
 import { diagnoseSymptom } from '../diagnostics.js';
 import { PART_BY_ID } from '../parts.js';
-import { createSandboxOrder, getOffers, isPumpVariant, isValidZip } from '../offers.js';
+import { createSandboxOrder, getCatalog, getOffers, isValidZip } from '../offers.js';
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
 import { PersonaError } from './persona.js';
-import { createPumpStore } from './singlestore.js';
+import { createPartsStore } from './singlestore.js';
 
 const pumpKey = 'water-pump';
 const priorities = new Set(['fastest', 'lowest-price', 'top-rated']);
@@ -45,10 +45,20 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function requireCatalog(partId, variant) {
+  const catalog = getCatalog(partId, variant);
+  if (!catalog) {
+    throw new ApiError(400, partId === pumpKey
+      ? 'Select the voltage and frequency from the machine nameplate.'
+      : 'Choose a Silvia M component and a matching catalog part number.');
+  }
+  return catalog;
+}
+
 function readApproval(body) {
-  const { approved, offerId, requestId, zip, variant, expectedQuote, diagnosisSource = null } = body;
+  const { approved, offerId, requestId, zip, partId = pumpKey, variant, expectedQuote, diagnosisSource = null } = body;
   if (approved !== true) throw new ApiError(400, 'Approve the sandbox order to continue.');
-  if (!isPumpVariant(variant)) throw new ApiError(400, 'Select the voltage and frequency from the machine nameplate.');
+  const catalog = requireCatalog(partId, variant);
   if (
     typeof offerId !== 'string' ||
     !offerId ||
@@ -62,7 +72,10 @@ function readApproval(body) {
   ) {
     throw new ApiError(400, 'Review an offer with a valid ZIP before approving.');
   }
-  return { offerId, zip: zip.trim(), requestId, variant, expectedQuote, diagnosisSource };
+  if (expectedQuote.partNumber !== catalog.partNumber) {
+    throw new ApiError(409, 'Review an offer for the selected catalog part.');
+  }
+  return { offerId, zip: zip.trim(), requestId, partId, variant, expectedQuote, diagnosisSource };
 }
 
 function matchesQuote(offer, quote) {
@@ -70,25 +83,31 @@ function matchesQuote(offer, quote) {
 }
 
 function handleMockApproval(input, mockOrders) {
-  const { offerId, zip, requestId, variant, expectedQuote, diagnosisSource } = input;
+  const { offerId, zip, requestId, partId, variant, expectedQuote, diagnosisSource } = input;
   const existing = mockOrders.get(requestId);
   if (existing) {
-    if (existing.offerId !== offerId || existing.order.zip !== zip || existing.order.diagnosisSource !== diagnosisSource || existing.variant !== variant ||
+    if (existing.offerId !== offerId || existing.partId !== partId || existing.order.zip !== zip ||
+      existing.order.diagnosisSource !== diagnosisSource ||
       !matchesQuote(existing.offer, expectedQuote)) {
       throw new ApiError(409, 'This approval was already used for a different quote.');
     }
     return existing.order;
   }
 
-  const offer = getOffers(zip, 'fastest', pumpKey, variant).find((candidate) => candidate.id === offerId);
-  if (!offer?.compatible) throw new ApiError(409, 'Choose a compatible pump before ordering.');
+  const offer = getOffers(zip, 'fastest', partId, variant).find((candidate) => candidate.id === offerId);
+  if (!offer?.compatible) throw new ApiError(409, 'Choose a compatible replacement before ordering.');
   if (!matchesQuote(offer, expectedQuote)) throw new ApiError(409, 'The quote changed. Review the current offer before approving.');
-  const order = { ...createSandboxOrder(offer, zip, pumpKey, variant), diagnosisSource };
-  mockOrders.set(requestId, { offerId, offer, order, variant });
+  const order = {
+    ...createSandboxOrder(offer, zip, partId, variant),
+    diagnosisSource,
+    fitReason: offer.fitReason,
+    rejectedReason: getCatalog(partId, variant).mismatch,
+  };
+  mockOrders.set(requestId, { offerId, offer, order, partId });
   return order;
 }
 
-export function createDemoApi(env, factories = { createLiveDiagnosis, createPumpStore }) {
+export function createDemoApi(env, factories = { createLiveDiagnosis, createPartsStore }) {
   const { mode, missing } = getDemoConfig(env);
   const isLive = mode === 'live';
   const mockOrders = new Map();
@@ -146,14 +165,15 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
       if (route === 'GET /offers') {
         const zip = url.searchParams.get('zip');
         const priority = url.searchParams.get('priority') ?? 'fastest';
-        const variant = url.searchParams.get('variant');
-        if (!isPumpVariant(variant)) throw new ApiError(400, 'Select the voltage and frequency from the machine nameplate.');
+        const partId = url.searchParams.get('part') ?? pumpKey;
+        const variant = url.searchParams.get('variant') ?? undefined;
+        requireCatalog(partId, variant);
         if (!isValidZip(zip)) throw new ApiError(400, 'Enter a valid five-digit ZIP code.');
         if (!priorities.has(priority)) throw new ApiError(400, 'Choose a supported ranking priority.');
         assertConfigured();
         upstream = 'SingleStore';
-        if (isLive) store ??= factories.createPumpStore(env);
-        const offers = isLive ? await store.getOffers(zip, priority, variant) : getOffers(zip, priority, pumpKey, variant);
+        if (isLive) store ??= factories.createPartsStore(env);
+        const offers = isLive ? await store.getOffers(zip, priority, partId, variant) : getOffers(zip, priority, partId, variant);
         sendJson(res, 200, { offers, source: isLive ? 'singlestore' : 'mock' });
         return;
       }
@@ -162,7 +182,7 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
         const input = readApproval(await readBody(req));
         assertConfigured();
         upstream = 'SingleStore';
-        if (isLive) store ??= factories.createPumpStore(env);
+        if (isLive) store ??= factories.createPartsStore(env);
         const order = isLive ? await store.createOrder(input) : handleMockApproval(input, mockOrders);
         sendJson(res, 200, { ...order, source: isLive ? 'singlestore' : 'mock' });
         return;

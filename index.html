@@ -91,6 +91,11 @@
               <select id="nameplate" aria-describedby="nameplate-help"><option value="">Select voltage and frequency</option></select>
               <p id="nameplate-help">Match both values on the machine’s rating label.</p>
             </div>
+            <div class="delivery-input nameplate-input" id="replacement-field" hidden>
+              <label for="replacement">Catalog part number</label>
+              <select id="replacement" aria-describedby="replacement-help"></select>
+              <p id="replacement-help">Match the part number or electrical rating before comparing offers.</p>
+            </div>
             <form id="delivery-form" class="delivery-form" hidden>
               <div class="delivery-input">
                 <label for="zip"><span data-icon="pin"></span> Ship to ZIP</label>
@@ -111,6 +116,7 @@
             <p id="location-status" class="location-status" aria-live="polite"></p>
             <p id="selection-status" class="sr-only" aria-live="polite"></p>
             <div id="sourcing-content" class="sourcing-content"></div>
+            <section id="supplier-listings" class="supplier-listings" aria-labelledby="supplier-listings-title" hidden></section>
             <aside id="part-reference" class="catalog-reference" aria-label="Rancilio parts reference" hidden></aside>
           </section>
         </aside>

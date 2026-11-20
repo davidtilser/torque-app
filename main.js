@@ -1,7 +1,8 @@
-import { createSandboxOrder, getOffers, isPumpVariant, isValidZip, PUMP_VARIANTS } from './offers.js';
+import { isPumpVariant, isValidZip, PUMP_VARIANTS } from './offers.js';
 import { demoRequest } from './demo-api.js';
-import { PARTS, PART_BY_ID, REMOVABLE_PARTS } from './parts.js';
+import { PARTS, PART_BY_ID, REMOVABLE_PARTS, VARIANT_NAMES } from './parts.js';
 import { mountViewer } from './viewer.js';
+import { getSupplierListings } from './supplier-listings.js';
 
 const icons = {
   brand: '<path d="M5.4 5h15l-1.8 4.1h-4.7L10 19H5.6l3.8-9.9H3.9z" fill="currentColor" stroke="none"/>',
@@ -44,9 +45,12 @@ const applyLocation = document.querySelector('#apply-location');
 const componentSelect = document.querySelector('#component-select');
 const selectionStatus = document.querySelector('#selection-status');
 const content = document.querySelector('#sourcing-content');
+const supplierListings = document.querySelector('#supplier-listings');
 const partReference = document.querySelector('#part-reference');
 const nameplateField = document.querySelector('#nameplate-field');
 const nameplateInput = document.querySelector('#nameplate');
+const replacementField = document.querySelector('#replacement-field');
+const replacementInput = document.querySelector('#replacement');
 const dialog = document.querySelector('#checkout');
 const expandedButton = document.querySelector('#expanded');
 const coverButton = document.querySelector('#machine-cover');
@@ -151,7 +155,11 @@ function selectPart(part, diagnosisSource = null) {
   if (component?.inside && !machineOpen) setMachineOpen(true);
   if (REMOVABLE_PARTS.has(part) && machineOpen) setMachineOpen(false);
   const changed = selectedPart !== part;
-  if (changed) selectedOfferId = null;
+  if (changed) {
+    selectedOfferId = null;
+    const options = (component?.partNumbers ?? []).map((code) => new Option(`${code} · ${VARIANT_NAMES[code] ?? component.name}`, code));
+    replacementInput.replaceChildren(new Option('Select a catalog part', ''), ...options);
+  }
   selectedPart = part;
   selectedDiagnosis = diagnosisSource;
   componentSelect.value = part ?? '';
@@ -293,7 +301,7 @@ function renderEmpty() {
 }
 
 function partSummary(part, subtitle = part.group) {
-  const icon = part.offerKey === 'seal' ? 'ring' : 'cube';
+  const icon = part.id === 'seal' ? 'ring' : 'cube';
   return `
     <div class="part-summary">
       <div class="part-art">${graphic(icon)}</div>
@@ -302,21 +310,27 @@ function partSummary(part, subtitle = part.group) {
   `;
 }
 
-function renderPartDetail(part) {
-  content.innerHTML = `
-    <div class="component-detail">
-      ${partSummary(part)}
-      <p class="component-description">${part.description}</p>
-      <div class="catalog-status">
-        <strong>No sandbox offers for this component</strong>
-        <p>Use the Rancilio catalog reference to identify the part.</p>
-      </div>
-    </div>
-  `;
+function renderSupplierListings(part, selectedNumber) {
+  const partNumbers = selectedNumber ? [selectedNumber] : part?.id === pumpKey ? [] : part?.partNumbers ?? [];
+  const groups = partNumbers.map(getSupplierListings).filter(({ listings }) => listings.length);
+  supplierListings.hidden = groups.length === 0;
+  supplierListings.innerHTML = groups.length ? `
+    <h3 id="supplier-listings-title">Supplier listings</h3>
+    <p>Check current price and stock on the supplier’s site.</p>
+    ${groups.length > 1 ? '<p>Match the part number to your machine before ordering.</p>' : ''}
+    <ul>${groups.map(({ partNumber, variant, listings }) => `
+      <li>
+        <strong>${escapeHtml(variant ? `${variant} · ${partNumber}` : partNumber)}</strong>
+        <div>${listings.map(({ seller, url }) => `
+          <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" aria-label="View part ${escapeHtml(partNumber)} at ${escapeHtml(seller)}">${escapeHtml(seller)} ${graphic('external')}</a>
+        `).join('')}</div>
+      </li>
+    `).join('')}</ul>
+  ` : '';
 }
 
-function offerCard(offer) {
-  const status = offer.compatible ? 'Exact fit' : 'Doesn’t fit';
+function offerCard(offer, part) {
+  const status = offer.compatible ? (part.id === pumpKey ? 'Exact fit' : 'Catalog match') : 'Doesn’t fit';
   const selection = offer.id === selectedOfferId;
   return `
     <label class="offer ${selection ? 'offer-selected' : ''} ${offer.compatible ? '' : 'offer-incompatible'}">
@@ -332,21 +346,21 @@ function offerCard(offer) {
   `;
 }
 
-function renderOffers(part, offers, source) {
+function renderOffers(part, offers, source, variant) {
   const selected = offers.find((offer) => offer.compatible && offer.id === selectedOfferId) ?? offers.find((offer) => offer.recommended);
   if (!selected) {
     content.textContent = 'No compatible offers are available for this part.';
     return;
   }
   selectedOfferId = selected.id;
-  offerView = { partId: part.id, offers, source };
+  offerView = { partId: part.id, offers, source, variant };
   const sourceSuffix = source === 'singlestore' ? ' · SingleStore' : '';
 
   content.innerHTML = `
-    ${partSummary(part, `${selected.spec} · ${offers.length} offers${sourceSuffix}`)}
+    ${partSummary(part, `${selected.spec} · ${offers.length} sandbox offers${sourceSuffix}`)}
     <fieldset class="offers">
       <legend class="sr-only">Replacement offers</legend>
-      ${offers.map(offerCard).join('')}
+      ${offers.map((offer) => offerCard(offer, part)).join('')}
     </fieldset>
     <div class="order-action">
       <button type="button" class="button button-primary" data-action="review">Review order <span>${currency.format(selected.total)} ${graphic('arrow')}</span></button>
@@ -354,17 +368,13 @@ function renderOffers(part, offers, source) {
   `;
 }
 
-async function loadOffers(part, request) {
-  const priority = priorityInput.value;
-  if (part.offerKey !== pumpKey) {
-    renderOffers(part, getOffers(zip, priority, part.offerKey), 'mock');
-    return;
-  }
-  content.innerHTML = '<p class="request-state" role="status">Loading pump offers…</p>';
+async function loadOffers(part, request, variant) {
+  content.innerHTML = '<p class="request-state" role="status">Loading replacement offers…</p>';
   try {
-    const query = new URLSearchParams({ zip, priority, variant: nameplateInput.value });
+    const query = new URLSearchParams({ zip, priority: priorityInput.value, part: part.id });
+    if (variant) query.set('variant', variant);
     const data = await demoRequest(`/offers?${query}`);
-    if (request === offerRequest) renderOffers(part, data.offers, data.source);
+    if (request === offerRequest) renderOffers(part, data.offers, data.source, variant);
   } catch (error) {
     if (request === offerRequest) {
       content.innerHTML = `<div class="request-state request-error" role="alert">${escapeHtml(error.message)}<br><button class="button button-secondary" type="button" data-action="retry-offers">Retry offers</button></div>`;
@@ -381,7 +391,7 @@ function renderReceipt(part, order) {
       <h3>Sandbox order placed</h3>
       <p>${escapeHtml(order.id)} · ${escapeHtml(order.seller)}${order.source === 'singlestore' ? ' · Saved in SingleStore' : ''}</p>
       <dl class="receipt-detail">
-        <div><dt>Part</dt><dd>${part.name} · ${escapeHtml(order.partNumber)}</dd></div>
+        <div><dt>Part</dt><dd>${escapeHtml(order.title)} · ${escapeHtml(order.partNumber)}</dd></div>
         <div><dt>Delivery to ${escapeHtml(order.zip)}</dt><dd>${escapeHtml(order.deliveryLabel)}</dd></div>
         <div><dt>Total</dt><dd>${currency.format(order.total)}</dd></div>
       </dl>
@@ -406,36 +416,41 @@ function renderContent() {
   offerView = null;
   const part = PART_BY_ID[selectedPart];
   const order = ordersByPart.get(selectedPart);
+  const isPump = part?.id === pumpKey;
+  const hasOptions = part && !isPump && part.partNumbers.length > 1;
+  const needsNameplate = isPump && !isPumpVariant(nameplateInput.value);
+  const needsPartNumber = hasOptions && !part.partNumbers.includes(replacementInput.value);
+  const variant = isPump ? nameplateInput.value : hasOptions ? replacementInput.value : undefined;
+  const selectedNumber = isPump ? PUMP_VARIANTS[variant]?.partNumber : variant;
+  renderSupplierListings(part, order?.partNumber ?? selectedNumber);
   diagnosisHandoff.hidden = !selectedDiagnosis || Boolean(order);
-  const needsNameplate = part?.offerKey === pumpKey && !isPumpVariant(nameplateInput.value);
-  nameplateField.hidden = part?.offerKey !== pumpKey || Boolean(order);
-  deliveryForm.hidden = !part?.offerKey || Boolean(order) || needsNameplate;
+  nameplateField.hidden = !isPump || Boolean(order);
+  replacementField.hidden = !hasOptions || Boolean(order);
+  deliveryForm.hidden = !part || Boolean(order) || needsNameplate || needsPartNumber;
   locationStatus.hidden = deliveryForm.hidden;
   if (!part) {
     renderEmpty();
-  } else if (!part.offerKey) {
-    renderPartDetail(part);
   } else if (order) {
     renderReceipt(part, order);
   } else if (needsNameplate) {
     content.innerHTML = partSummary(part, 'Choose the nameplate to compare compatible pumps.');
+  } else if (needsPartNumber) {
+    content.innerHTML = partSummary(part, 'Choose a catalog part number to compare offers.');
   } else {
-    return loadOffers(part, request);
+    return loadOffers(part, request, variant);
   }
 }
 
 async function openCheckout() {
   const part = PART_BY_ID[selectedPart];
-  if (!part?.offerKey || dialog.open) return;
+  if (!part || dialog.open) return;
   if (zipInput.value.trim() !== zip && !await applyZip()) return;
   if (dialog.open || selectedPart !== part.id || offerView?.partId !== part.id) return;
   const offer = offerView.offers.find((candidate) => candidate.id === selectedOfferId && candidate.compatible);
   if (!offer) return;
   quote = {
-    offer, zip, partId: part.id, offerKey: part.offerKey, diagnosisSource: selectedDiagnosis,
-    variant: nameplateInput.value,
+    offer, zip, partId: part.id, diagnosisSource: selectedDiagnosis, variant: offerView.variant,
     requestId: crypto.randomUUID(),
-    rejectedReason: offerView.offers.find((candidate) => !candidate.compatible)?.fitReason,
   };
   dialog.innerHTML = `
     <div class="checkout-top">
@@ -445,8 +460,8 @@ async function openCheckout() {
     <h2 id="checkout-title">Want me to order it?</h2>
     <p>Review the replacement and delivery details.</p>
     <dl class="receipt-detail">
-      <div><dt>Part</dt><dd>${part.name} · ${escapeHtml(offer.partNumber)}</dd></div>
-      ${part.offerKey === pumpKey ? `<div><dt>Machine nameplate</dt><dd>${escapeHtml(offer.spec)}</dd></div>` : ''}
+      <div><dt>Part</dt><dd>${escapeHtml(offer.title)} · ${escapeHtml(offer.partNumber)}</dd></div>
+      ${part.id === pumpKey ? `<div><dt>Machine nameplate</dt><dd>${escapeHtml(offer.spec)}</dd></div>` : ''}
       <div><dt>Seller</dt><dd>${escapeHtml(offer.seller)}</dd></div>
       <div><dt>Delivery to ${escapeHtml(zip)}</dt><dd>${escapeHtml(offer.deliveryLabel)}</dd></div>
       <div><dt>Total with shipping</dt><dd>${currency.format(offer.total)}</dd></div>
@@ -499,18 +514,13 @@ dialog.addEventListener('click', async (event) => {
     submit.textContent = offerView?.source === 'singlestore' ? 'Checking and placing order…' : 'Placing sandbox order…';
     message.hidden = true;
     try {
-      const { offer, zip, offerKey, requestId } = checkout;
-      const order = offerKey === pumpKey ? await demoRequest('/orders', {
-        approved: true, offerId: offer.id, zip, requestId, variant: checkout.variant,
+      const { offer, zip, partId, requestId, variant } = checkout;
+      const order = await demoRequest('/orders', {
+        approved: true, offerId: offer.id, zip, partId, requestId, variant,
         diagnosisSource: checkout.diagnosisSource,
         expectedQuote: { partNumber: offer.partNumber, total: offer.total, deliveryDays: offer.deliveryDays },
-      }) : createSandboxOrder(offer, zip, offerKey);
-      ordersByPart.set(checkout.partId, {
-        ...order,
-        fitReason: order.fitReason ?? offer.fitReason,
-        rejectedReason: order.rejectedReason ?? checkout.rejectedReason,
-        diagnosisSource: order.diagnosisSource ?? checkout.diagnosisSource,
       });
+      ordersByPart.set(partId, order);
     } catch (error) {
       message.textContent = error.message;
       message.hidden = false;
@@ -555,14 +565,12 @@ zipInput.addEventListener('input', () => {
   applyLocation.hidden = zipInput.value === zip;
   locationStatus.textContent = '';
 });
-priorityInput.addEventListener('change', () => {
-  selectedOfferId = null;
-  renderContent();
-});
-nameplateInput.addEventListener('change', () => {
-  selectedOfferId = null;
-  renderContent();
-});
+for (const input of [priorityInput, nameplateInput, replacementInput]) {
+  input.addEventListener('change', () => {
+    selectedOfferId = null;
+    renderContent();
+  });
+}
 
 content.addEventListener('click', async (event) => {
   const component = event.target.closest('[data-component]')?.dataset.component;
@@ -584,7 +592,7 @@ content.addEventListener('click', async (event) => {
 content.addEventListener('change', (event) => {
   if (event.target.name === 'offer' && offerView?.partId === selectedPart) {
     selectedOfferId = event.target.value;
-    renderOffers(PART_BY_ID[selectedPart], offerView.offers, offerView.source);
+    renderOffers(PART_BY_ID[selectedPart], offerView.offers, offerView.source, offerView.variant);
     content.querySelector('input[name="offer"]:checked')?.focus({ preventScroll: true });
   }
 });

@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { pumpListings } from '../offers.js';
+import { catalogListings, getCatalog, PUMP_VARIANTS, pumpListings } from '../offers.js';
 import { PARTS } from '../parts.js';
 import { createSilviaModel } from '../silvia-model.js';
+import { getSupplierListings } from '../supplier-listings.js';
 import { createDemoApi } from './api.js';
 import { requiredLiveCredentials } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
 import { createPersonaVerifier } from './persona.js';
-import { createPumpStore } from './singlestore.js';
+import { createPartsStore } from './singlestore.js';
 
 const symptom = 'The pump makes a loud noise, but no water comes out of the group head.';
 const zip = '94105';
@@ -77,11 +78,14 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   };
   let personaStatus = 'completed';
   let saved;
-  const listings = pumpListings;
+  const listings = catalogListings;
   const pool = {
     async query() { return [[{ Field: 'persona_status' }]]; },
     async execute(sql, params) {
-      if (sql.includes('INSERT IGNORE INTO torque_pump_offers')) return [{ affectedRows: 0 }];
+      if (sql.includes('INSERT IGNORE INTO torque_pump_offers')) {
+        assert.equal(params.length, 10 * listings.length);
+        return [{ affectedRows: 0 }];
+      }
       if (sql.includes('FROM torque_pump_orders')) return [saved?.request_id === params[0] ? [saved] : []];
       if (sql.includes('INSERT INTO torque_pump_orders')) {
         calls.push('SingleStore sandbox write');
@@ -96,9 +100,9 @@ test('live checkout requires Persona approval and persists it with the sandbox o
       }
       assert(sql.includes('FROM torque_pump_offers'));
       if (!sql.includes(' IN (')) return [listings.filter(({ id }) => id === params[0])];
-      assert.deepEqual(params, listings.map(({ id }) => id));
+      assert(params.every((id) => listings.some((listing) => listing.id === id)));
       calls.push('SingleStore read');
-      return [listings];
+      return [params.map((id) => listings.find((listing) => listing.id === id))];
     },
   };
   const api = createDemoApi(env, {
@@ -115,7 +119,7 @@ test('live checkout requires Persona approval and persists it with the sandbox o
         ]);
       },
     }),
-    createPumpStore: (config) => createPumpStore(config, {
+    createPartsStore: (config) => createPartsStore(config, {
       pool,
       verifyTechnician: createPersonaVerifier(config, { fetch: async (url, { headers, redirect }) => {
         assert.equal(url.origin, 'https://api.withpersona.com');
@@ -138,6 +142,7 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   const { data: catalog } = await request(api, 'GET', catalogUrl);
   assert.equal(catalog.source, 'singlestore');
   assert.equal(catalog.offers[2].compatible, false);
+  assert.deepEqual(new Set(catalog.offers.map(({ id }) => id)), new Set(pumpListings.map(({ id }) => id)));
   const purchase = { ...approval(catalog.offers[0]), diagnosisSource: diagnosis.source };
   assert.equal((await request(api, 'POST', '/orders', { ...purchase, approved: false })).status, 400);
   assert.equal((await request(api, 'POST', '/orders', approval(catalog.offers[2]))).status, 409);
@@ -159,9 +164,30 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   assert.deepEqual(calls, ['Cognee', 'Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
 });
 
+test('the agent can submit a non-pump part order and rejects a mismatched variant', async () => {
+  const api = createDemoApi({});
+  const { data: catalog } = await request(api, 'GET', `/offers?zip=${zip}&part=water-tank`);
+  assert.equal(catalog.offers[0].partNumber, '38120334');
+  const orderInput = { ...approval(catalog.offers[0]), partId: 'water-tank', variant: undefined };
+  const first = await request(api, 'POST', '/orders', orderInput);
+  assert.equal(first.status, 200);
+  assert.equal(first.data.partNumber, '38120334');
+  assert.match(first.data.fitReason, /38120334/);
+  assert.equal((await request(api, 'POST', '/orders', orderInput)).data.id, first.data.id);
+
+  assert.equal((await request(api, 'GET', `/offers?zip=${zip}&part=heating-element`)).status, 400);
+  const { data: heater } = await request(api, 'GET', `/offers?zip=${zip}&part=heating-element&variant=10705638`);
+  const invalid = heater.offers.find(({ partNumber }) => partNumber === '10705639');
+  assert.equal(invalid.compatible, false);
+  const denial = await request(api, 'POST', '/orders', {
+    ...approval(invalid), partId: 'heating-element', variant: '10705638',
+  });
+  assert.equal(denial.status, 409);
+});
+
 test('live mode with missing credentials surfaces configuration without calling a sponsor', async () => {
   const denied = () => { throw new Error('Sponsor factory should not be called.'); };
-  const api = createDemoApi({ TORQUE_MODE: 'live' }, { createLiveDiagnosis: denied, createPumpStore: denied });
+  const api = createDemoApi({ TORQUE_MODE: 'live' }, { createLiveDiagnosis: denied, createPartsStore: denied });
   const health = await request(api, 'GET', '/status');
   assert.deepEqual(health.data, { mode: 'live', configured: false });
   const failed = await request(api, 'POST', '/diagnose', { symptom });
@@ -169,7 +195,7 @@ test('live mode with missing credentials surfaces configuration without calling 
   assert.match(failed.data.error, /COGNEE_API_KEY/);
 });
 
-test('every Silvia M component has a pickable mesh and a catalog reference', () => {
+test('every Silvia M component has a pickable mesh, catalog reference, and supplier listing', () => {
   const { group } = createSilviaModel();
   const tagged = new Set();
   group.traverse((object) => {
@@ -177,6 +203,20 @@ test('every Silvia M component has a pickable mesh and a catalog reference', () 
   });
   assert.deepEqual(tagged, new Set(PARTS.map(({ id }) => id)));
   assert(PARTS.every(({ page, partNumbers }) => [5, 7, 9].includes(page) && partNumbers.length));
+  for (const { id, partNumbers } of PARTS) {
+    for (const partNumber of partNumbers) {
+      const selector = partNumbers.length === 1 ? undefined : partNumber;
+      const variant = id === 'water-pump'
+        ? Object.keys(PUMP_VARIANTS).find((key) => PUMP_VARIANTS[key].partNumber === partNumber)
+        : selector;
+      const offers = getCatalog(id, variant)?.listings.filter((offer) => offer.partNumber === partNumber);
+      assert.equal(offers?.length, 2);
+      assert(offers.every(({ priceCents }) => Number.isInteger(priceCents) && priceCents > 0));
+      const { listings } = getSupplierListings(partNumber);
+      assert(listings.length, `Missing a supplier listing for ${partNumber}`);
+      assert(listings.every(({ url }) => new URL(url).protocol === 'https:'));
+    }
+  }
 });
 
 test('Persona rejects production credentials before contacting the provider', async () => {

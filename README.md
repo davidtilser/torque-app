@@ -12,7 +12,7 @@ We built Torque for the **Tokens& Personal Agents Hackathon** in San Francisco o
 
 1. **Describe the fault or select a part.** A technician can enter a symptom, such as a noisy pump with no water flow, and get likely causes and checks. If they already know the part, they can click it directly. The Three.js model has 34 selectable components, an open-machine cutaway, and an exploded view. Each component links to the relevant page of the manufacturer’s catalog. [Rancilio Silvia M spare parts catalog](RLCSILVIAM_en-US.pdf)
 2. **Check fit and compare offers.** For pump shopping, Torque asks for the voltage and frequency on the machine’s nameplate. The catalog specifies `34011023` for **120 V / 60 Hz** and `34011026` for **220–230 V / 50 Hz**. Torque ranks compatible offers by delivery to the technician’s ZIP code, total price including shipping, or seller reviews. It keeps incompatible offers visible with the reason they were excluded.
-3. **Review and approve.** The technician confirms the part number, seller, delivered price, and ETA. After explicit approval, Torque rechecks the quote and fit, checks the demo technician’s verification status, and saves a sandbox order.
+3. **Review and approve.** The technician confirms the part number, seller, delivered price, and ETA. After explicit approval, Torque submits the sandbox order itself. In sponsor mode it rechecks the quote and fit, verifies the demo technician through Persona, and saves the order in SingleStore.
 4. **Read the audit trail.** The receipt records how the part was selected, why it fit, why the alternate was rejected, the Persona verification result, and the technician’s approval.
 
 ## Sponsor tools
@@ -20,10 +20,10 @@ We built Torque for the **Tokens& Personal Agents Hackathon** in San Francisco o
 | Tool | How we use it | Why it matters |
 | --- | --- | --- |
 | **Cognee** | Searches a dataset containing the Rancilio spare parts PDF. Torque uses it to look up OEM part numbers for selected components and ground the pump diagnosis in catalog evidence. | The technician can trace a recommendation to a manufacturer part number and catalog page. |
-| **SingleStore** | Serves the pump offer catalog. At approval, Torque reads the current offer again, verifies fit and quote details, then stores the sandbox order and its audit record. | The saved order reflects the quote the technician reviewed, and the decision can be inspected afterward. |
-| **Persona Sandbox** | Checks the approved test technician’s inquiry through the Persona API before saving an explicitly approved pump order. | The demo shows how a purchasing agent can verify the person behind an approval. Torque stores the verification outcome in the receipt. |
+| **SingleStore** | Serves the replacement offer catalog. At approval, Torque reads the current offer again, verifies fit and quote details, then stores the sandbox order and its audit record. | The saved order reflects the quote the technician reviewed, and the decision can be inspected afterward. |
+| **Persona Sandbox** | Checks the approved test technician’s inquiry through the Persona API before saving an explicitly approved sandbox order. | The demo shows how a purchasing agent can verify the person behind an approval. Torque stores the verification outcome in the receipt. |
 
-The 3D cutaway uses illustrative internal geometry. Sellers, prices, reviews, and delivery estimates are demo fixtures. All checkout is sandboxed. The pump path uses all three sponsors. The group head gasket and reservoir hose have local demo offers.
+The 3D cutaway uses illustrative internal geometry. All 34 components support in-app sandbox checkout. Sandbox listings use demo prices, ratings, and delivery estimates. Each component also links to real supplier listings by exact catalog number.
 
 ## Run locally
 

@@ -1,20 +1,20 @@
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
-import { createPumpStore } from './singlestore.js';
+import { createPartsStore } from './singlestore.js';
 
 async function seedDemo() {
   const config = getDemoConfig(process.env);
   if (config.mode !== 'live') throw new Error('Set TORQUE_MODE=live in .env.local before seeding.');
   if (config.missing.length) throw new Error(`Missing credentials: ${config.missing.join(', ')}.`);
 
-  const store = createPumpStore(process.env);
+  const store = createPartsStore(process.env);
   const results = await Promise.allSettled([
     Promise.resolve().then(() => createLiveDiagnosis(process.env).seed()),
     Promise.resolve().then(() => store.seed()),
   ]);
   await store.close?.();
 
-  const labels = ['Cognee Silvia M catalog', 'SingleStore Silvia M pump offers'];
+  const labels = ['Cognee Silvia M catalog', 'SingleStore Silvia M parts catalog'];
   for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled') {
       console.log(`${labels[index]} is ready.`);
