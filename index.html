@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101113">
+    <meta name="description" content="Torque is a workbench for diagnosing equipment and sourcing replacement parts.">
+    <title>Torque — Service workbench</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23dafa60'/%3E%3Cpath d='M7 8h18l-2.5 5H17l-4 11H7.5l4-11H5z' fill='%23111310'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand"><span class="brand-mark" data-icon="brand" aria-hidden="true"></span><span>TORQUE</span></div>
+        <span class="header-divider" aria-hidden="true"></span>
+        <span class="header-location">Service workbench</span>
+        <span class="sandbox"><span></span> Prototype mode</span>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <div class="page-heading">
+        <div>
+          <p class="equipment-label"><span data-icon="box"></span> Commercial equipment</p>
+          <h1>Espresso machine</h1>
+          <p class="page-description">Diagnose a fault or select a component to find a replacement.</p>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="model-card" aria-labelledby="model-title">
+          <div class="panel-header">
+            <div class="panel-icon" data-icon="cube"></div>
+            <div><h2 id="model-title">Interactive machine</h2><p>Two-group espresso machine</p></div>
+            <button class="icon-button reset-view" type="button" title="Reset 3D view" aria-label="Reset 3D view" data-icon="reset"></button>
+          </div>
+          <div class="model-stage">
+            <div id="viewer" class="viewer" aria-label="Interactive 3D espresso machine"></div>
+            <div class="view-options">
+              <button type="button" id="machine-cover" aria-expanded="false" aria-controls="viewer"><span data-icon="cover"></span><span id="machine-cover-label">Open machine</span></button>
+              <button type="button" id="expanded" aria-pressed="false"><span data-icon="layers"></span> Exploded view</button>
+            </div>
+            <span class="view-hint"><span data-icon="cursor"></span> Drag to rotate <span class="hint-divider"></span> Scroll to zoom</span>
+          </div>
+          <div class="part-picker">
+            <label class="part-label" for="component-select">Component</label>
+            <select id="component-select" class="component-select">
+              <option value="">Choose a component</option>
+            </select>
+            <span class="component-count" id="component-count"></span>
+          </div>
+        </section>
+
+        <aside class="tool-card" aria-label="Service tools">
+          <div class="tool-tabs" role="tablist" aria-label="Service workflow">
+            <button type="button" class="tool-tab" id="diagnose-tab" role="tab" aria-selected="true" aria-controls="diagnose-panel" data-tool="diagnose"><span data-icon="activity"></span> Diagnose</button>
+            <button type="button" class="tool-tab" id="parts-tab" role="tab" aria-selected="false" aria-controls="parts-panel" tabindex="-1" data-tool="parts"><span data-icon="shopping"></span> Find a part</button>
+          </div>
+
+          <section class="tool-panel" id="diagnose-panel" role="tabpanel" aria-labelledby="diagnose-tab">
+            <div class="tool-intro">
+              <span class="tool-icon" data-icon="activity"></span>
+              <h2>What’s the machine doing?</h2>
+              <p>Describe what happens when you try to use it. Torque will suggest what to check first.</p>
+            </div>
+            <form id="symptom-form" class="symptom-form">
+              <label for="symptoms">Symptoms</label>
+              <textarea id="symptoms" name="symptoms" rows="4" maxlength="1000" required placeholder="The pump makes noise, but no water comes out…"></textarea>
+              <button type="submit" class="button button-primary"><span data-icon="sparkle"></span> Analyze symptoms <span class="button-end" data-icon="arrow"></span></button>
+            </form>
+            <div class="symptom-examples" id="symptom-examples">
+              <span>Try an example</span>
+              <div>
+                <button type="button" data-symptom="The pump makes a loud noise, but no water comes out of either group head.">Pump runs, no water</button>
+                <button type="button" data-symptom="Water leaks around the left portafilter handle while brewing.">Leaks around handle</button>
+                <button type="button" data-symptom="The machine brews coffee, but the steam wand has weak steam pressure.">Weak steam pressure</button>
+              </div>
+            </div>
+            <div id="diagnosis-result" class="diagnosis-result" aria-live="polite" hidden></div>
+          </section>
+
+          <section class="tool-panel" id="parts-panel" role="tabpanel" aria-labelledby="parts-tab" hidden>
+            <div class="tool-intro parts-intro">
+              <h2>Replacement parts</h2>
+              <p>Check fit, delivery, price, and seller reviews.</p>
+            </div>
+            <p id="diagnosis-handoff" class="diagnosis-handoff" hidden><span data-icon="activity"></span> Possible cause from Diagnose. Verify the fault before replacing the part.</p>
+            <form id="delivery-form" class="delivery-form" hidden>
+              <div class="delivery-input">
+                <label for="zip"><span data-icon="pin"></span> Ship to ZIP</label>
+                <div class="zip-controls">
+                  <input id="zip" name="zip" inputmode="numeric" autocomplete="postal-code" value="94105" maxlength="5" pattern="[0-9]{5}" required aria-describedby="location-status">
+                  <button type="submit" class="link-button" id="apply-location" hidden>Apply</button>
+                </div>
+              </div>
+              <div class="delivery-input priority-input">
+                <label for="priority"><span data-icon="sliders"></span> Prioritize</label>
+                <select id="priority" name="priority">
+                  <option value="fastest">Fastest delivery</option>
+                  <option value="lowest-price">Lowest total</option>
+                  <option value="top-rated">Best reviews</option>
+                </select>
+              </div>
+            </form>
+            <p id="location-status" class="location-status" aria-live="polite"></p>
+            <p id="selection-status" class="sr-only" aria-live="polite"></p>
+            <div id="sourcing-content" class="sourcing-content"></div>
+          </section>
+        </aside>
+      </div>
+      <footer class="site-footer">
+        <span><span data-icon="shield"></span> Illustrative machine · Mock diagnosis and checkout</span>
+        <a href="https://tevy.dev/models/espresso-machine" target="_blank" rel="noopener noreferrer">3D model by Tevy <span data-icon="external"></span></a>
+      </footer>
+    </main>
+    <dialog id="checkout" aria-labelledby="checkout-title"></dialog>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
