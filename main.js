@@ -1,5 +1,5 @@
 import { createSandboxOrder, getOffers, isValidZip } from './offers.js';
-import { diagnoseSymptom } from './diagnostics.js';
+import { demoRequest } from './demo-api.js';
 import { PARTS, PART_BY_ID } from './parts.js';
 import { mountViewer } from './viewer.js';
 
@@ -29,6 +29,8 @@ const icons = {
 };
 
 const graphic = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
+const escaped = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => escaped[character]);
 document.querySelectorAll('[data-icon]').forEach((element) => {
   element.innerHTML = graphic(element.dataset.icon);
 });
@@ -54,6 +56,15 @@ const symptomExamples = document.querySelector('#symptom-examples');
 const diagnosisResult = document.querySelector('#diagnosis-result');
 const diagnosePanel = document.querySelector('#diagnose-panel');
 const diagnosisHandoff = document.querySelector('#diagnosis-handoff');
+const diagnoseButton = symptomForm.querySelector('button[type="submit"]');
+const demoMode = document.querySelector('#demo-mode');
+const pumpKey = 'water-pump';
+
+demoRequest('/status').then(({ mode, configured }) => {
+  if (mode === 'live') demoMode.textContent = configured ? 'Sponsor demo' : 'Sponsor setup needed';
+}).catch(() => {
+  demoMode.textContent = 'Demo server unavailable';
+});
 
 const groups = new Map();
 for (const part of PARTS) {
@@ -96,8 +107,11 @@ const recommendationLabels = {
 
 let zip = zipInput.value;
 let selectedPart = null;
-let selectedFromDiagnosis = false;
+let selectedDiagnosis = null;
 let selectedOfferId = null;
+let offerView;
+let offerRequest = 0;
+let submittingOrder = false;
 let quote = null;
 const ordersByPart = new Map();
 let expanded = false;
@@ -120,40 +134,39 @@ function setMachineOpen(open) {
   viewer.setOpen(open);
 }
 
-function selectPart(part, fromDiagnosis = false) {
+function selectPart(part, diagnosisSource = null) {
   if (part !== null && !Object.hasOwn(PART_BY_ID, part)) return;
   const component = PART_BY_ID[part];
   if (component?.inside && !machineOpen) setMachineOpen(true);
   if (coverParts.has(part) && machineOpen) setMachineOpen(false);
   if (selectedPart !== part) selectedOfferId = null;
   selectedPart = part;
-  selectedFromDiagnosis = fromDiagnosis;
+  selectedDiagnosis = diagnosisSource;
   componentSelect.value = part ?? '';
   selectionStatus.textContent = component ? `${component.name} selected.` : '';
   viewer.select(part);
   if (component) showTool('parts');
-  renderContent();
+  return renderContent();
 }
 
-function renderDiagnosis(symptom) {
-  const result = diagnoseSymptom(symptom);
+function renderDiagnosis(result) {
   const matched = result.status === 'matched';
   const heading = matched ? (result.causes.length ? 'Likely causes' : 'Next step') : 'A little more detail';
-  symptomExamples.hidden = true;
-  diagnosePanel.classList.add('has-result');
+  diagnosisResult.dataset.source = result.source;
+  const source = result.source === 'live' ? 'Arcee + Cognee' : 'Mock diagnosis';
   diagnosisResult.innerHTML = `
     <div class="diagnosis-heading">
-      <span class="diagnosis-label">${graphic('sparkle')} Mock diagnosis</span>
+      <span class="diagnosis-label">${graphic('sparkle')} ${source}</span>
       <button type="button" class="text-button" data-clear-diagnosis>New check</button>
     </div>
     <h3 tabindex="-1">${heading}</h3>
-    <p>${result.summary}</p>
+    <p>${escapeHtml(result.summary)}</p>
     ${matched ? `
       <div class="cause-list">
         ${result.causes.map((cause) => `
           <article class="cause">
-            <h4>${cause.title}</h4>
-            <p>${cause.description}</p>
+            <h4>${escapeHtml(cause.title)}</h4>
+            <p>${escapeHtml(cause.description)}</p>
             <div class="cause-actions">
               ${cause.partIds.filter((id) => Object.hasOwn(PART_BY_ID, id)).map((id) => `
                 <button type="button" data-diagnose-part="${id}">${graphic('cube')} Inspect ${PART_BY_ID[id].name.toLowerCase()} ${graphic('chevron')}</button>
@@ -163,17 +176,37 @@ function renderDiagnosis(symptom) {
         `).join('')}
       </div>
       ${result.checks.length ? `
-        <div class="diagnosis-checks"><h4>Checks to try first</h4><ul>${result.checks.map((check) => `<li>${check}</li>`).join('')}</ul></div>
+        <div class="diagnosis-checks"><h4>Checks to try first</h4><ul>${result.checks.map((check) => `<li>${escapeHtml(check)}</li>`).join('')}</ul></div>
       ` : ''}
-    ` : `<div class="diagnosis-question">${result.clarification}</div>`}
+    ` : `<div class="diagnosis-question">${escapeHtml(result.clarification)}</div>`}
   `;
   diagnosisResult.hidden = false;
+}
+
+async function analyzeSymptom(symptom) {
+  if (diagnoseButton.disabled) return;
+  diagnoseButton.disabled = true;
+  symptomExamples.hidden = true;
+  diagnosePanel.classList.add('has-result');
+  diagnosisResult.hidden = false;
+  diagnosisResult.innerHTML = '<p class="request-state" role="status">Analyzing symptoms…</p>';
+  try {
+    renderDiagnosis(await demoRequest('/diagnose', { symptom }));
+    if (document.activeElement === document.body || document.activeElement === diagnoseButton) {
+      diagnosisResult.querySelector('h3')?.focus({ preventScroll: true });
+    }
+  } catch (error) {
+    diagnosisResult.innerHTML = `<p class="request-state request-error" role="alert">${escapeHtml(error.message)}</p>`;
+    symptomExamples.hidden = false;
+  } finally {
+    diagnoseButton.disabled = false;
+  }
 }
 
 symptomForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const symptom = symptomInput.value.trim();
-  if (symptom) renderDiagnosis(symptom);
+  if (symptom) analyzeSymptom(symptom);
   else {
     symptomInput.setCustomValidity('Describe what the machine does when you try to use it.');
     symptomInput.reportValidity();
@@ -185,13 +218,12 @@ symptomExamples.addEventListener('click', (event) => {
   if (!symptom) return;
   symptomInput.value = symptom;
   symptomInput.setCustomValidity('');
-  renderDiagnosis(symptom);
-  diagnosisResult.querySelector('h3').focus({ preventScroll: true });
+  analyzeSymptom(symptom);
 });
 diagnosisResult.addEventListener('click', (event) => {
   const part = event.target.closest('[data-diagnose-part]')?.dataset.diagnosePart;
   if (part) {
-    selectPart(part, true);
+    selectPart(part, diagnosisResult.dataset.source ?? 'mock');
     document.querySelector('#parts-tab').focus({ preventScroll: true });
   } else if (event.target.closest('[data-clear-diagnosis]')) {
     symptomForm.reset();
@@ -232,7 +264,7 @@ function partSummary(part, subtitle = part.group) {
   return `
     <div class="part-summary">
       <div class="part-art">${graphic(icon)}</div>
-      <div><h3>${part.name}</h3><p>${subtitle}</p></div>
+      <div><h3>${part.name}</h3><p>${escapeHtml(subtitle)}</p></div>
     </div>
   `;
 }
@@ -255,29 +287,30 @@ function offerCard(offer) {
   const selection = offer.id === selectedOfferId;
   return `
     <label class="offer ${selection ? 'offer-selected' : ''} ${offer.compatible ? '' : 'offer-incompatible'}">
-      <input type="radio" name="offer" value="${offer.id}" ${selection ? 'checked' : ''} ${offer.compatible ? '' : 'disabled'} aria-label="${offer.seller}, ${currency.format(offer.total)}, ${status}">
+      <input type="radio" name="offer" value="${escapeHtml(offer.id)}" ${selection ? 'checked' : ''} ${offer.compatible ? '' : 'disabled'} aria-label="${escapeHtml(offer.seller)}, ${currency.format(offer.total)}, ${status}">
       <div class="offer-main">
-        <div class="offer-line"><span class="offer-name">${offer.seller}</span>${offer.recommended ? `<span class="recommended">${graphic('sparkle')}${recommendationLabels[priorityInput.value]}</span>` : ''}</div>
-        <div class="offer-meta"><span class="fit ${offer.compatible ? '' : 'fit-no'}">${graphic(offer.compatible ? 'check' : 'close')}${status} · ${offer.spec}</span><span class="offer-rating">${graphic('star')}${offer.rating.toFixed(1)} <span>(${offer.reviewCount.toLocaleString('en-US')})</span></span></div>
-        <div class="offer-detail">${graphic('truck')}${offer.deliveryLabel}</div>
-        ${offer.compatible ? '' : `<div class="offer-reason">${offer.fitReason}</div>`}
+        <div class="offer-line"><span class="offer-name">${escapeHtml(offer.seller)}</span>${offer.recommended ? `<span class="recommended">${graphic('sparkle')}${recommendationLabels[priorityInput.value]}</span>` : ''}</div>
+        <div class="offer-meta"><span class="fit ${offer.compatible ? '' : 'fit-no'}">${graphic(offer.compatible ? 'check' : 'close')}${status} · ${escapeHtml(offer.spec)}</span><span class="offer-rating">${graphic('star')}${offer.rating.toFixed(1)} <span>(${offer.reviewCount.toLocaleString('en-US')})</span></span></div>
+        <div class="offer-detail">${graphic('truck')}${escapeHtml(offer.deliveryLabel)}</div>
+        ${offer.compatible ? '' : `<div class="offer-reason">${escapeHtml(offer.fitReason)}</div>`}
       </div>
       <div class="offer-price"><strong>${currency.format(offer.total)}</strong><small>with shipping</small></div>
     </label>
   `;
 }
 
-function renderOffers(part) {
-  const offers = getOffers(zip, priorityInput.value, part.offerKey);
+function renderOffers(part, offers, source) {
   const selected = offers.find((offer) => offer.compatible && offer.id === selectedOfferId) ?? offers.find((offer) => offer.recommended);
   if (!selected) {
-    content.textContent = 'Enter a valid five-digit ZIP code to compare offers.';
+    content.textContent = 'No compatible offers are available for this part.';
     return;
   }
   selectedOfferId = selected.id;
+  offerView = { partId: part.id, offers, source };
+  const sourceSuffix = source === 'singlestore' ? ' · SingleStore' : '';
 
   content.innerHTML = `
-    ${partSummary(part, `${selected.spec} · ${offers.length} offers`)}
+    ${partSummary(part, `${selected.spec} · ${offers.length} offers${sourceSuffix}`)}
     <fieldset class="offers">
       <legend class="sr-only">Replacement offers</legend>
       ${offers.map(offerCard).join('')}
@@ -288,24 +321,44 @@ function renderOffers(part) {
   `;
 }
 
+async function loadOffers(part, request) {
+  const priority = priorityInput.value;
+  if (part.offerKey !== pumpKey) {
+    renderOffers(part, getOffers(zip, priority, part.offerKey), 'mock');
+    return;
+  }
+  content.innerHTML = '<p class="request-state" role="status">Loading pump offers…</p>';
+  try {
+    const query = new URLSearchParams({ zip, priority });
+    const data = await demoRequest(`/offers?${query}`);
+    if (request === offerRequest) renderOffers(part, data.offers, data.source);
+  } catch (error) {
+    if (request === offerRequest) {
+      content.innerHTML = `<div class="request-state request-error" role="alert">${escapeHtml(error.message)}<br><button class="button button-secondary" type="button" data-action="retry-offers">Retry offers</button></div>`;
+    }
+  }
+}
+
 function renderReceipt(part, order) {
+  const diagnosis = order.diagnosisSource === 'live' ? ' from an Arcee + Cognee diagnosis'
+    : order.diagnosisSource === 'mock' ? ' from a mock diagnosis' : '';
   content.innerHTML = `
     <div class="receipt" tabindex="-1" aria-live="polite">
       <span class="receipt-icon">${graphic('check')}</span>
       <h3>Sandbox order placed</h3>
-      <p>${order.id} · ${order.seller}</p>
+      <p>${escapeHtml(order.id)} · ${escapeHtml(order.seller)}${order.source === 'singlestore' ? ' · Saved in SingleStore' : ''}</p>
       <dl class="receipt-detail">
-        <div><dt>Part</dt><dd>${part.name} · ${order.partNumber}</dd></div>
-        <div><dt>Delivery to ${order.zip}</dt><dd>${order.deliveryLabel}</dd></div>
+        <div><dt>Part</dt><dd>${part.name} · ${escapeHtml(order.partNumber)}</dd></div>
+        <div><dt>Delivery to ${escapeHtml(order.zip)}</dt><dd>${escapeHtml(order.deliveryLabel)}</dd></div>
         <div><dt>Total</dt><dd>${currency.format(order.total)}</dd></div>
       </dl>
       <details class="audit">
         <summary>${graphic('list')} Order audit trail</summary>
         <ol>
-          <li>${part.name} selected${order.fromDiagnosis ? ' from a mock diagnosis' : ''}.</li>
-          <li>${order.fitReason}</li>
-          ${order.rejectedReason ? `<li>Excluded offer. ${order.rejectedReason}</li>` : ''}
-          <li>Compared delivered price, ETA, and seller reviews for ZIP ${order.zip}.</li>
+          <li>${part.name} selected${diagnosis}.</li>
+          <li>${escapeHtml(order.fitReason)}</li>
+          ${order.rejectedReason ? `<li>Excluded offer. ${escapeHtml(order.rejectedReason)}</li>` : ''}
+          <li>Compared delivered price, ETA, and seller reviews for ZIP ${escapeHtml(order.zip)}.</li>
           <li>You approved the sandbox order for ${currency.format(order.total)}.</li>
         </ol>
       </details>
@@ -315,9 +368,11 @@ function renderReceipt(part, order) {
 }
 
 function renderContent() {
+  const request = ++offerRequest;
+  offerView = null;
   const part = PART_BY_ID[selectedPart];
   const order = ordersByPart.get(selectedPart);
-  diagnosisHandoff.hidden = !selectedFromDiagnosis || Boolean(order);
+  diagnosisHandoff.hidden = !selectedDiagnosis || Boolean(order);
   deliveryForm.hidden = !part?.offerKey || Boolean(order);
   locationStatus.hidden = deliveryForm.hidden;
   if (!part) {
@@ -327,18 +382,22 @@ function renderContent() {
   } else if (order) {
     renderReceipt(part, order);
   } else {
-    renderOffers(part);
+    return loadOffers(part, request);
   }
 }
 
-function openCheckout() {
+async function openCheckout() {
   const part = PART_BY_ID[selectedPart];
-  if (!part?.offerKey) return;
-  if (zipInput.value !== zip && !applyZip()) return;
-  const offers = getOffers(zip, priorityInput.value, part.offerKey);
-  const offer = offers.find((candidate) => candidate.id === selectedOfferId && candidate.compatible);
+  if (!part?.offerKey || dialog.open) return;
+  if (zipInput.value.trim() !== zip && !await applyZip()) return;
+  if (dialog.open || selectedPart !== part.id || offerView?.partId !== part.id) return;
+  const offer = offerView.offers.find((candidate) => candidate.id === selectedOfferId && candidate.compatible);
   if (!offer) return;
-  quote = { offer, zip, partId: part.id, offerKey: part.offerKey, fromDiagnosis: selectedFromDiagnosis, rejectedReason: offers.find((candidate) => !candidate.compatible)?.fitReason };
+  quote = {
+    offer, zip, partId: part.id, offerKey: part.offerKey, diagnosisSource: selectedDiagnosis,
+    requestId: crypto.randomUUID(),
+    rejectedReason: offerView.offers.find((candidate) => !candidate.compatible)?.fitReason,
+  };
   dialog.innerHTML = `
     <div class="checkout-top">
       <span class="panel-icon">${graphic('shopping')}</span>
@@ -347,9 +406,9 @@ function openCheckout() {
     <h2 id="checkout-title">Want me to order it?</h2>
     <p>Review the replacement and delivery details.</p>
     <dl class="receipt-detail">
-      <div><dt>Part</dt><dd>${part.name} · ${offer.partNumber}</dd></div>
-      <div><dt>Seller</dt><dd>${offer.seller}</dd></div>
-      <div><dt>Delivery to ${zip}</dt><dd>${offer.deliveryLabel}</dd></div>
+      <div><dt>Part</dt><dd>${part.name} · ${escapeHtml(offer.partNumber)}</dd></div>
+      <div><dt>Seller</dt><dd>${escapeHtml(offer.seller)}</dd></div>
+      <div><dt>Delivery to ${escapeHtml(zip)}</dt><dd>${escapeHtml(offer.deliveryLabel)}</dd></div>
       <div><dt>Total with shipping</dt><dd>${currency.format(offer.total)}</dd></div>
     </dl>
     <p class="checkout-sandbox">${graphic('shield')} Sandbox order · No payment will be taken</p>
@@ -362,17 +421,18 @@ function openCheckout() {
   dialog.showModal();
 }
 
-function applyZip() {
+async function applyZip() {
   if (!isValidZip(zipInput.value)) {
     zipInput.reportValidity();
     locationStatus.textContent = 'Enter a five-digit ZIP code.';
     return false;
   }
-  zip = zipInput.value;
+  zip = zipInput.value.trim();
+  zipInput.value = zip;
   selectedOfferId = null;
   applyLocation.hidden = true;
   locationStatus.textContent = 'Delivery estimates updated.';
-  renderContent();
+  await renderContent();
   return true;
 }
 
@@ -381,23 +441,44 @@ dialog.addEventListener('close', () => {
   if (ordersByPart.has(selectedPart)) content.querySelector('.receipt')?.focus();
   else content.querySelector('[data-action="review"]')?.focus();
 });
-dialog.addEventListener('click', (event) => {
+dialog.addEventListener('cancel', (event) => {
+  if (submittingOrder) event.preventDefault();
+});
+dialog.addEventListener('click', async (event) => {
   const action = event.target.closest('[data-dialog]')?.dataset.dialog;
+  if (submittingOrder) return;
   if (action === 'cancel') dialog.close();
   if (action === 'confirm' && quote && !ordersByPart.has(quote.partId)) {
+    const checkout = quote;
+    const buttons = [...dialog.querySelectorAll('button')];
+    const submit = dialog.querySelector('[data-dialog="confirm"]');
+    const message = dialog.querySelector('.checkout-error');
+    submittingOrder = true;
+    buttons.forEach((button) => { button.disabled = true; });
+    submit.textContent = 'Placing sandbox order…';
+    message.hidden = true;
     try {
-      const order = createSandboxOrder(quote.offer, quote.zip, quote.offerKey);
-      ordersByPart.set(quote.partId, {
+      const { offer, zip, offerKey, requestId } = checkout;
+      const order = offerKey === pumpKey ? await demoRequest('/orders', {
+        approved: true, offerId: offer.id, zip, requestId,
+        diagnosisSource: checkout.diagnosisSource,
+        expectedQuote: { partNumber: offer.partNumber, total: offer.total, deliveryDays: offer.deliveryDays },
+      }) : createSandboxOrder(offer, zip, offerKey);
+      ordersByPart.set(checkout.partId, {
         ...order,
-        fitReason: quote.offer.fitReason,
-        rejectedReason: quote.rejectedReason,
-        fromDiagnosis: quote.fromDiagnosis,
+        fitReason: order.fitReason ?? offer.fitReason,
+        rejectedReason: order.rejectedReason ?? checkout.rejectedReason,
+        diagnosisSource: order.diagnosisSource ?? checkout.diagnosisSource,
       });
     } catch (error) {
-      const message = dialog.querySelector('.checkout-error');
       message.textContent = error.message;
       message.hidden = false;
+      if (error.statusCode === 409) renderContent();
       return;
+    } finally {
+      submittingOrder = false;
+      submit.textContent = 'Approve sandbox order';
+      buttons.forEach((button) => { button.disabled = false; });
     }
     dialog.close();
     renderContent();
@@ -438,25 +519,27 @@ priorityInput.addEventListener('change', () => {
   renderContent();
 });
 
-content.addEventListener('click', (event) => {
+content.addEventListener('click', async (event) => {
   const component = event.target.closest('[data-component]')?.dataset.component;
   if (component) {
-    selectPart(component);
-    content.querySelector('input[name="offer"]:checked, .receipt')?.focus({ preventScroll: true });
+    await selectPart(component);
+    if (selectedPart === component) content.querySelector('input[name="offer"]:checked, .receipt')?.focus({ preventScroll: true });
     return;
   }
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'review') openCheckout();
+  if (action === 'retry-offers') renderContent();
   if (action === 'compare') {
-    ordersByPart.delete(selectedPart);
-    renderContent();
-    content.querySelector('[data-action="review"]')?.focus();
+    const part = selectedPart;
+    ordersByPart.delete(part);
+    await renderContent();
+    if (selectedPart === part) content.querySelector('[data-action="review"]')?.focus();
   }
 });
 content.addEventListener('change', (event) => {
-  if (event.target.name === 'offer') {
+  if (event.target.name === 'offer' && offerView?.partId === selectedPart) {
     selectedOfferId = event.target.value;
-    renderContent();
+    renderOffers(PART_BY_ID[selectedPart], offerView.offers, offerView.source);
     content.querySelector('input[name="offer"]:checked')?.focus({ preventScroll: true });
   }
 });

@@ -137,7 +137,7 @@ const internalParts = {
 
 const sellers = sealOffers.map(({ id, seller, rating, reviewCount }) => ({ id, seller, rating, reviewCount }));
 
-function getCatalog(offerKey) {
+export function getCatalog(offerKey) {
   if (offerKey === 'seal') {
     return {
       partNumber: SEAL_PART_NUMBER,
@@ -176,8 +176,7 @@ function deliveryAdjustment(zip) {
   return 3;
 }
 
-export function getOffers(zip = DEMO_ZIP, urgency = 'fastest', offerKey = 'seal') {
-  const catalog = getCatalog(offerKey);
+export function quoteCatalog(catalog, zip, urgency = 'fastest') {
   if (!catalog || !isValidZip(zip)) return [];
 
   const deliveryZip = zip.trim();
@@ -209,6 +208,10 @@ export function getOffers(zip = DEMO_ZIP, urgency = 'fastest', offerKey = 'seal'
 
   offers.sort((left, right) => Number(right.compatible) - Number(left.compatible) || compare(left, right));
   return offers.map((offer, index) => ({ ...offer, recommended: index === 0 && offer.compatible }));
+}
+
+export function getOffers(zip = DEMO_ZIP, urgency = 'fastest', offerKey = 'seal') {
+  return quoteCatalog(getCatalog(offerKey), zip, urgency);
 }
 
 export function createSandboxOrder(offer, zip, offerKey = 'seal') {

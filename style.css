@@ -34,6 +34,7 @@ svg { display: block; height: 1em; width: 1em; flex: 0 0 auto; }
 .header-location { color: var(--muted); font-size: 12px; font-weight: 550; }
 .sandbox { margin-left: auto; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color: #c7cbc8; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .sandbox > span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.sandbox strong { font-weight: inherit; }
 
 .workbench { max-width: 1440px; margin: 0 auto; padding: 27px 30px 0; }
 .page-heading { margin-bottom: 22px; }
@@ -134,6 +135,9 @@ h1 { margin-top: 7px; font-size: clamp(36px, 4vw, 52px); line-height: 1.04; font
 .diagnosis-checks { margin-top: 11px; }
 .diagnosis-checks ul { margin: 4px 0 0; padding-left: 17px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .diagnosis-question { margin-top: 8px; border-left: 2px solid var(--accent); padding: 5px 0 5px 9px; color: #d3ddd5; font-size: 12px; line-height: 1.55; }
+.request-state { padding: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.request-error { color: var(--danger); }
+.request-error button { margin-top: 8px; }
 
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 39px; padding: 8px 11px; border: 1px solid transparent; border-radius: 7px; font-size: 12px; line-height: 1.25; font-weight: 800; }
 .button svg { width: 15px; height: 15px; }

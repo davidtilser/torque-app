@@ -20,13 +20,13 @@ Torque is designed to let the technician provide observations and explicitly app
 
 ## Sponsor integration plan
 
-The current demo mocks these roles locally. The proposed live integration would give each sponsor tool a distinct job in the same workflow.
+The sponsor demo uses three tools in the pump workflow. See [local setup](README.md#run-the-sponsor-pump-demo) for credentials and seeding.
 
 | Tool | Intended role |
 | --- | --- |
-| Senso | Retrieve manufacturer repair evidence and part numbers. Use cited catalog context to explain why a replacement fits. |
-| Arcee | Interpret a technician’s symptom report and route it to likely causes, checks, and components. Explain rankings using verified offers. |
-| SingleStore | Store offer and approval records, sandbox order state, and the audit trail. |
+| Arcee | Rank candidate pump faults and choose checks based on the technician’s symptom and graph evidence. |
+| Cognee | Retrieve relationships between the symptom, checks, and modeled components from a seeded pump knowledge graph. |
+| SingleStore | Read the pump catalog, recheck fit at approval, and save the sandbox order and audit record. |
 
 Firedrill was considered for a test that reproduces the wrong-variant purchase, then verifies that the agent excludes the incompatible offer after the fix. [Firedrill judging and event credits](https://discord.com/channels/1278435478609072198/1570734626828320819/1573372434244173925)
 

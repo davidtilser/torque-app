@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "test": "node --test server/api.test.js",
+    "preview": "vite preview --host 127.0.0.1",
+    "seed:demo": "node --env-file-if-exists=.env.local server/seed.js"
   },
   "dependencies": {
+    "singlestore-nodejs": "1.0.1",
     "three": "0.186.1"
   },
   "devDependencies": {

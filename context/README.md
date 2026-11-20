@@ -17,9 +17,17 @@ The concept started with step-by-step spatial guidance for production-line equip
 - The component picker covers 47 components. The model includes eight illustrative internal parts with mock listings and checkout. Both group head seals also have mock listings. Other exterior parts show identification and availability.
 - The internal catalog covers the steam boiler, brew boiler, water pump, solenoid valve, control board, pressure switch, inlet hose, and heating element.
 - Diagnostic fixtures cover noisy or low-flow pumping, leaks around the handle, weak steam, cold brew water, unresponsive controls, and flow diverted to the drip tray.
-- Sellers, SKUs, compatibility, prices, ratings, delivery estimates, and checkout are local mock data. The Tevy asset depicts a generic machine, and the internal geometry is illustrative. The prototype makes no real purchase and has no live backend or sponsor APIs connected. [Tevy asset and CC0 license](https://tevy.dev/models/espresso-machine)
+- Sellers, SKUs, prices, ratings, and delivery estimates are demo fixtures. The Tevy asset depicts a generic machine with an illustrative interior. Checkout always creates a sandbox receipt. [Tevy asset and CC0 license](https://tevy.dev/models/espresso-machine)
 
 Run `npm ci` and `npm run dev` to preview. Use `npm run build` to check the production build.
+
+## Run the sponsor pump demo
+
+1. Copy `.env.example` to `.env.local` and set `TORQUE_MODE=live`. Add the Arcee API key, the Cognee Cloud API key and workspace API URL, and the SingleStore SQL host, database, username, and password. Use a demo database where that user can create tables, read, and insert. Set `SINGLESTORE_CA_PATH` if the cluster uses a CA bundle.
+2. Run `npm run seed:demo`. It loads the illustrative pump knowledge into Cognee and creates and seeds the `torque_pump_offers` and `torque_pump_orders` tables in SingleStore. The demo server also initializes its pump tables on first use.
+3. Start or restart `npm run dev`. Click **Pump runs, no water → Inspect water pump → Review order → Approve sandbox order**. The diagnosis should show **Arcee + Cognee**, the pump offers should show **SingleStore**, and the receipt should say **Saved in SingleStore**.
+
+The pump diagnosis queries Cognee and uses Arcee to rank candidates grounded in the result. SingleStore serves the fixture offers and stores approved pump orders and their audit records. The other prototype scenarios use local data. `TORQUE_MODE=mock` runs the same pump flow without sponsor credentials. Keep `.env.local` local.
 
 ## Repository map
 
@@ -30,5 +38,6 @@ Run `npm ci` and `npm run dev` to preview. Use `npm run build` to check the prod
 | `parts.js` | Component names, descriptions, and catalog links |
 | `diagnostics.js` | Local symptom-to-cause rules and follow-up questions |
 | `offers.js` | Mock listings, fit and ranking logic, and sandbox orders |
+| `server/` | Demo API, Arcee and Cognee diagnosis, SingleStore pump catalog and order persistence |
 
 See [the three-minute demo](demo.md) and [the hackathon brief and sponsor notes](hackathon.md).
