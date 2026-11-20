@@ -2,15 +2,19 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { getCatalog } from '../offers.js';
+import { pumpListings } from '../offers.js';
+import { PARTS } from '../parts.js';
+import { createSilviaModel } from '../silvia-model.js';
 import { createDemoApi } from './api.js';
 import { requiredLiveCredentials } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
 import { createPersonaVerifier } from './persona.js';
 import { createPumpStore } from './singlestore.js';
 
-const symptom = 'The pump makes a loud noise, but no water comes out of either group head.';
+const symptom = 'The pump makes a loud noise, but no water comes out of the group head.';
 const zip = '94105';
+const variant = '120v-60hz';
+const catalogUrl = `/offers?zip=${zip}&variant=${variant}`;
 
 async function request(api, method, url, body) {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
@@ -28,6 +32,7 @@ function approval(offer) {
     approved: true,
     offerId: offer.id,
     zip,
+    variant,
     requestId: randomUUID(),
     expectedQuote: { partNumber: offer.partNumber, total: offer.total, deliveryDays: offer.deliveryDays },
   };
@@ -38,9 +43,16 @@ test('mock pump flow requires approval and rejects incompatible or stale quotes'
   const { data: diagnosis } = await request(api, 'POST', '/diagnose', { symptom });
   assert.equal(diagnosis.source, 'mock');
   assert(diagnosis.causes.some((cause) => cause.partIds.includes('water-pump')));
-  const { data } = await request(api, 'GET', `/offers?zip=${zip}`);
+  const { data } = await request(api, 'GET', catalogUrl);
   assert.equal(data.source, 'mock');
   const [best, , incompatible] = data.offers;
+  assert.equal(best.partNumber, '34011023');
+  assert.equal(incompatible.partNumber, '34011026');
+  assert.equal(incompatible.compatible, false);
+  assert.equal((await request(api, 'GET', `/offers?zip=${zip}`)).status, 400);
+  const alternate = await request(api, 'GET', `/offers?zip=${zip}&variant=230v-50hz`);
+  assert.equal(alternate.data.offers[0].partNumber, '34011026');
+  assert.equal(alternate.data.offers.find((offer) => offer.partNumber === '34011023').compatible, false);
 
   const purchase = approval(best);
   assert.equal((await request(api, 'POST', '/orders', { ...purchase, approved: false })).status, 400);
@@ -65,7 +77,7 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   };
   let personaStatus = 'completed';
   let saved;
-  const { listings } = getCatalog('water-pump');
+  const listings = pumpListings;
   const pool = {
     async query() { return [[{ Field: 'persona_status' }]]; },
     async execute(sql, params) {
@@ -83,7 +95,8 @@ test('live checkout requires Persona approval and persists it with the sandbox o
         return [{ affectedRows: 1 }];
       }
       assert(sql.includes('FROM torque_pump_offers'));
-      if (params) return [listings.filter(({ id }) => id === params[0])];
+      if (!sql.includes(' IN (')) return [listings.filter(({ id }) => id === params[0])];
+      assert.deepEqual(params, listings.map(({ id }) => id));
       calls.push('SingleStore read');
       return [listings];
     },
@@ -92,11 +105,13 @@ test('live checkout requires Persona approval and persists it with the sandbox o
     createLiveDiagnosis: (config) => createLiveDiagnosis(config, {
       fetch: async (url, { body }) => {
         assert.equal(url, 'https://api.cognee.ai/api/v1/search');
-        assert(JSON.parse(body).query.includes(symptom));
+        const payload = JSON.parse(body);
+        assert(payload.query.includes('Silvia M'));
+        assert.deepEqual(payload.datasets, ['default_dataset']);
         calls.push('Cognee');
         return Response.json([
-          { dataset_name: 'torque-pump-demo', context_result: 'A water-pump or inlet-hose issue can affect both groups.' },
-          { dataset_name: 'another-dataset', context_result: 'The solenoid-valve is stuck.' },
+          { dataset_name: 'default_dataset', context_result: '34011023 34011026 38228002' },
+          { dataset_name: 'another-dataset', context_result: '34040039' },
         ]);
       },
     }),
@@ -117,8 +132,10 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   const { data: diagnosis } = await request(api, 'POST', '/diagnose', { symptom });
   assert.equal(diagnosis.source, 'live');
   assert.deepEqual(diagnosis.causes.flatMap((cause) => cause.partIds), ['inlet-hose', 'water-pump']);
-  assert.match(diagnosis.checks.at(-1), /confirm the failing component/);
-  const { data: catalog } = await request(api, 'GET', `/offers?zip=${zip}`);
+  assert.match(diagnosis.checks.at(-1), /confirm the faulty part/);
+  const { data: reference } = await request(api, 'GET', '/part-evidence?part=water-pump');
+  assert.deepEqual(reference, { partId: 'water-pump', partNumbers: ['34011023', '34011026'], source: 'cognee' });
+  const { data: catalog } = await request(api, 'GET', catalogUrl);
   assert.equal(catalog.source, 'singlestore');
   assert.equal(catalog.offers[2].compatible, false);
   const purchase = { ...approval(catalog.offers[0]), diagnosisSource: diagnosis.source };
@@ -139,7 +156,7 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   personaStatus = 'declined';
   const replay = await request(api, 'POST', '/orders', purchase);
   assert.deepEqual(replay.data, order);
-  assert.deepEqual(calls, ['Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
+  assert.deepEqual(calls, ['Cognee', 'Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
 });
 
 test('live mode with missing credentials surfaces configuration without calling a sponsor', async () => {
@@ -150,6 +167,16 @@ test('live mode with missing credentials surfaces configuration without calling 
   const failed = await request(api, 'POST', '/diagnose', { symptom });
   assert.equal(failed.status, 503);
   assert.match(failed.data.error, /COGNEE_API_KEY/);
+});
+
+test('every Silvia M component has a pickable mesh and a catalog reference', () => {
+  const { group } = createSilviaModel();
+  const tagged = new Set();
+  group.traverse((object) => {
+    if (object.isMesh) tagged.add(object.userData.partId);
+  });
+  assert.deepEqual(tagged, new Set(PARTS.map(({ id }) => id)));
+  assert(PARTS.every(({ page, partNumbers }) => [5, 7, 9].includes(page) && partNumbers.length));
 });
 
 test('Persona rejects production credentials before contacting the provider', async () => {

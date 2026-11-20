@@ -1,67 +1,53 @@
-// Left and right are as seen from the front of the machine.
 const componentGroups = {
   'Inside the machine': [
-    ['steam-boiler', 'Steam boiler', 'Stores heated water to supply steam and hot water.', 'steam-boiler'],
-    ['brew-boiler', 'Brew boiler', 'Heats the water supplied to the brew groups.', 'brew-boiler'],
-    ['water-pump', 'Water pump', 'Moves water through the machine and builds brewing pressure.', 'water-pump'],
-    ['solenoid-valve', 'Solenoid valve', 'Opens and closes the water path when electrically actuated.', 'solenoid-valve'],
-    ['control-board', 'Control board', 'Coordinates the pump, heaters, and brewing controls.', 'control-board'],
-    ['pressure-switch', 'Pressure switch', 'Responds to steam pressure to help regulate the boiler.', 'pressure-switch'],
-    ['inlet-hose', 'Inlet hose', 'Carries incoming water to the pump.', 'inlet-hose'],
-    ['heating-element', 'Heating element', 'The replaceable heater for the boiler assembly.', 'heating-element'],
+    ['water-tank', 'Water tank', 'The removable 2 L reservoir under the rear lid.', 5, ['38120334']],
+    ['boiler', 'Boiler', 'The Silvia uses one insulated boiler for brewing and steam.', 9, ['10705636', '10705637', '69000409']],
+    ['water-pump', 'Water pump', 'Draws water from the reservoir. The catalog lists two voltage and frequency variants.', 9, ['34011023', '34011026'], 'water-pump'],
+    ['solenoid-valve', 'Three-way valve', 'Routes brew water and drains pressure from the group.', 7, ['34040039', '34040053']],
+    ['expansion-valve', 'Expansion valve', 'Part of the pressure regulation circuit between the pump and boiler.', 9, ['10060406']],
+    ['brew-thermostat', 'Brew thermostat', 'Senses boiler temperature during brewing.', 9, ['34200296']],
+    ['steam-thermostat', 'Steam thermostat', 'Senses boiler temperature during steaming.', 9, ['34200295']],
+    ['inlet-hose', 'Reservoir hose', 'Carries water from the tank to the pump.', 9, ['38228002'], 'inlet-hose'],
+    ['heating-element', 'Heating element', 'The replaceable heater is fitted within the boiler assembly.', 9, ['10705638', '10705639']],
+    ['steam-valve', 'Steam valve', 'The valve behind the knob controls flow to the steam wand.', 9, ['10060119', '10705169']],
   ],
-  'Brewing': [
-    ['seal', 'Left group head seal', 'The silicone gasket between the left group head and the portafilter.', 'seal'],
-    ['seal-right', 'Right group head seal', 'The silicone gasket between the right group head and the portafilter.', 'seal'],
-    ['portafilter-left', 'Left portafilter', 'The removable handled holder for the left brew group’s coffee basket.'],
-    ['portafilter-right', 'Right portafilter', 'The removable handled holder for the right brew group’s coffee basket.'],
-    ['brew-head-left', 'Left group head', 'The assembly where the left portafilter locks into the machine.'],
-    ['brew-head-right', 'Right group head', 'The assembly where the right portafilter locks into the machine.'],
-    ['shower-screen-left', 'Left shower screen', 'The screen under the left group head that distributes water over the grounds.'],
-    ['shower-screen-right', 'Right shower screen', 'The screen under the right group head that distributes water over the grounds.'],
+  Brewing: [
+    ['brew-head', 'Group head', 'The assembly where the single portafilter locks in.', 7, ['20103022D']],
+    ['seal', 'Group head gasket', 'Seals the joint between the brew group and portafilter.', 7, ['36301030'], 'seal'],
+    ['shower-screen', 'Shower screen', 'Distributes water over the grounds.', 7, ['40200005']],
+    ['portafilter', 'Portafilter', 'The removable handle and filter holder.', 7, ['10070108R']],
   ],
-  'Steam and water': [
-    ['steam-wand-left', 'Left steam wand', 'The left pivoting tube used to steam milk.'],
-    ['steam-wand-right', 'Right steam wand', 'The right pivoting tube used to steam milk.'],
-    ['steam-knob-left', 'Left steam knob', 'The control for the left steam wand.'],
-    ['steam-knob-right', 'Right steam knob', 'The control for the right steam wand.'],
-    ['water-knob', 'Hot water knob', 'The control for the center hot-water spout.'],
-    ['hot-water-spout', 'Hot water spout', 'The center outlet for dispensing hot water.'],
+  'Steam and controls': [
+    ['steam-wand', 'Steam wand', 'The pivoting tube for steaming milk and dispensing hot water.', 9, ['10049063']],
+    ['steam-knob', 'Steam knob', 'Opens and closes the steam valve.', 5, ['10060190']],
+    ['power-switch', 'Power switch', 'Turns the machine on or off.', 5, ['34030144']],
+    ['brew-switch', 'Brew switch', 'Starts and stops water flow through the group.', 5, ['34030047']],
+    ['water-switch', 'Hot-water switch', 'Switches on the hot-water function.', 5, ['34030029']],
+    ['steam-switch', 'Steam switch', 'Switches the boiler to steam mode.', 5, ['34030038']],
   ],
-  'Controls and gauges': [
-    ['pressure-gauge-left', 'Left pressure gauge', 'The round pressure indicator to the left of center.'],
-    ['pressure-gauge-right', 'Right pressure gauge', 'The round pressure indicator to the right of center.'],
-    ['control-panel-left', 'Left brew control panel', 'The mounting plate around the left brew buttons.'],
-    ['control-panel-right', 'Right brew control panel', 'The mounting plate around the right brew buttons.'],
-    ...['left', 'right'].flatMap((side) =>
-      ['lower-left', 'upper-left', 'lower-right', 'upper-right'].map((position, index) => [
-        `brew-button-${side}-${index + 1}`,
-        `${side === 'left' ? 'Left' : 'Right'} panel, ${position} button`,
-        `The ${position} brew button on the ${side} control panel.`,
-      ]),
+  'Housing and tray': [
+    ['tank-lid', 'Reservoir lid', 'The black lid over the removable water tank.', 5, ['38123011']],
+    ['top-panel', 'Top panel', 'The steel top cover and cup-warming surface.', 5, ['32330363']],
+    ['side-panel-left', 'Left housing panel', 'The left side of the Silvia body.', 5, ['32330362']],
+    ['side-panel-right', 'Right housing panel', 'The right side of the Silvia body.', 5, ['32330362']],
+    ['rear-panel', 'Rear housing panel', 'The rear face of the Silvia body.', 5, ['32330362']],
+    ['front-panel', 'Front control panel', 'The upper steel fascia around the controls.', 5, ['32331989']],
+    ['lower-panel', 'Lower front panel', 'The back wall of the cup area below the group.', 5, ['32330370']],
+    ['chassis', 'Chassis', 'The structural frame beneath the housing.', 5, ['10880188']],
+    ['drip-grate', 'Cup grate', 'The removable steel surface that supports a cup.', 5, ['32330369']],
+    ['drip-tray', 'Drip tray', 'Catches spills and runoff under the cup grate.', 5, ['32330365']],
+    ...['front-left', 'front-right', 'rear-left', 'rear-right'].map((corner) =>
+      [`foot-${corner}`, `${corner.replace('-', ' ')} foot`, 'Rubber support under the chassis.', 5, ['36310008']],
     ),
-  ],
-  'Body and tray': [
-    ['drip-grate', 'Drip tray grate', 'The removable slatted surface that supports the cups.'],
-    ['drip-tray', 'Drip tray', 'The tray below the grate that catches spills and runoff.'],
-    ['cup-rail', 'Cup warmer rail', 'The raised rail around the top cup-warming surface.'],
-    ['top-panel', 'Top panel', 'The top cover and cup-warming surface.'],
-    ['front-panel', 'Front panel', 'The body panels behind the controls and brew assemblies.'],
-    ['rear-panel', 'Rear panel', 'The back cover of the machine.'],
-    ['side-panel-left', 'Left side panel', 'The left exterior cover.'],
-    ['side-panel-right', 'Right side panel', 'The right exterior cover.'],
-    ['chassis', 'Bottom chassis', 'The base and underside of the machine housing.'],
-    ['foot-front-left', 'Front left foot', 'The support under the front left corner.'],
-    ['foot-front-right', 'Front right foot', 'The support under the front right corner.'],
-    ['foot-rear-left', 'Rear left foot', 'The support under the rear left corner.'],
-    ['foot-rear-right', 'Rear right foot', 'The support under the rear right corner.'],
   ],
 };
 
 export const PARTS = Object.entries(componentGroups).flatMap(([group, components]) =>
-  components.map(([id, name, description, offerKey]) => ({
-    id, name, group, description, offerKey, inside: group === 'Inside the machine',
+  components.map(([id, name, description, page, partNumbers, offerKey]) => ({
+    id, name: name[0].toUpperCase() + name.slice(1), group, description, page, partNumbers, offerKey,
+    inside: group === 'Inside the machine',
   })),
 );
 
 export const PART_BY_ID = Object.fromEntries(PARTS.map((part) => [part.id, part]));
+export const REMOVABLE_PARTS = new Set(['tank-lid', 'top-panel', 'side-panel-left', 'lower-panel']);

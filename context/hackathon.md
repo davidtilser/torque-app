@@ -24,7 +24,7 @@ The pump workflow integrates three sponsor tools. See [local setup](README.md#ru
 
 | Tool | Role |
 | --- | --- |
-| Cognee | Retrieve relationships between the symptom, checks, and modeled components from a seeded pump knowledge graph. |
+| Cognee | Retrieve manufacturer part numbers from the existing Silvia M catalog dataset and ground the pump diagnosis in the catalog. |
 | Persona | Check the demo technician’s Sandbox verification status before saving the approved order. |
 | SingleStore | Read the pump catalog, recheck fit at approval, and save the sandbox order and audit record. |
 

@@ -14,7 +14,7 @@ async function seedDemo() {
   ]);
   await store.close?.();
 
-  const labels = ['Cognee pump knowledge graph', 'SingleStore pump catalog'];
+  const labels = ['Cognee Silvia M catalog', 'SingleStore Silvia M pump offers'];
   for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled') {
       console.log(`${labels[index]} is ready.`);

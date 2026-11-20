@@ -22,8 +22,8 @@
     <main class="workbench">
       <div class="page-heading">
         <div>
-          <p class="equipment-label"><span data-icon="box"></span> Commercial equipment</p>
-          <h1>Espresso machine</h1>
+          <p class="equipment-label"><span data-icon="box"></span> Espresso machine</p>
+          <h1>Rancilio Silvia M</h1>
           <p class="page-description">Diagnose a fault or select a component to find a replacement.</p>
         </div>
       </div>
@@ -32,11 +32,11 @@
         <section class="model-card" aria-labelledby="model-title">
           <div class="panel-header">
             <div class="panel-icon" data-icon="cube"></div>
-            <div><h2 id="model-title">Interactive machine</h2><p>Two-group espresso machine</p></div>
+            <div><h2 id="model-title">Interactive machine</h2><p>Silvia M · Single group</p></div>
             <button class="icon-button reset-view" type="button" title="Reset 3D view" aria-label="Reset 3D view" data-icon="reset"></button>
           </div>
           <div class="model-stage">
-            <div id="viewer" class="viewer" aria-label="Interactive 3D espresso machine"></div>
+            <div id="viewer" class="viewer" aria-label="Interactive 3D Rancilio Silvia M"></div>
             <div class="view-options">
               <button type="button" id="machine-cover" aria-expanded="false" aria-controls="viewer"><span data-icon="cover"></span><span id="machine-cover-label">Open machine</span></button>
               <button type="button" id="expanded" aria-pressed="false"><span data-icon="layers"></span> Exploded view</button>
@@ -72,8 +72,8 @@
             <div class="symptom-examples" id="symptom-examples">
               <span>Try an example</span>
               <div>
-                <button type="button" data-symptom="The pump makes a loud noise, but no water comes out of either group head.">Pump runs, no water</button>
-                <button type="button" data-symptom="Water leaks around the left portafilter handle while brewing.">Leaks around handle</button>
+                <button type="button" data-symptom="The pump makes a loud noise, but no water comes out of the group head.">Pump runs, no water</button>
+                <button type="button" data-symptom="Water leaks around the portafilter handle while brewing.">Leaks around handle</button>
                 <button type="button" data-symptom="The machine brews coffee, but the steam wand has weak steam pressure.">Weak steam pressure</button>
               </div>
             </div>
@@ -86,6 +86,11 @@
               <p>Check fit, delivery, price, and seller reviews.</p>
             </div>
             <p id="diagnosis-handoff" class="diagnosis-handoff" hidden><span data-icon="activity"></span> Possible cause from Diagnose. Verify the fault before replacing the part.</p>
+            <div class="delivery-input nameplate-input" id="nameplate-field" hidden>
+              <label for="nameplate">Machine nameplate</label>
+              <select id="nameplate" aria-describedby="nameplate-help"><option value="">Select voltage and frequency</option></select>
+              <p id="nameplate-help">Match both values on the machine’s rating label.</p>
+            </div>
             <form id="delivery-form" class="delivery-form" hidden>
               <div class="delivery-input">
                 <label for="zip"><span data-icon="pin"></span> Ship to ZIP</label>
@@ -106,12 +111,13 @@
             <p id="location-status" class="location-status" aria-live="polite"></p>
             <p id="selection-status" class="sr-only" aria-live="polite"></p>
             <div id="sourcing-content" class="sourcing-content"></div>
+            <aside id="part-reference" class="catalog-reference" aria-label="Rancilio parts reference" hidden></aside>
           </section>
         </aside>
       </div>
       <footer class="site-footer">
-        <span><span data-icon="shield"></span> Illustrative machine · Sandbox checkout</span>
-        <a href="https://tevy.dev/models/espresso-machine" target="_blank" rel="noopener noreferrer">3D model by Tevy <span data-icon="external"></span></a>
+        <span><span data-icon="shield"></span> Illustrative cutaway · Sandbox checkout</span>
+        <a id="catalog-link" target="_blank" rel="noopener noreferrer">Rancilio spare parts catalog <span data-icon="external"></span></a>
       </footer>
     </main>
     <dialog id="checkout" aria-labelledby="checkout-title"></dialog>

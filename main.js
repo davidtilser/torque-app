@@ -1,6 +1,6 @@
-import { createSandboxOrder, getOffers, isValidZip } from './offers.js';
+import { createSandboxOrder, getOffers, isPumpVariant, isValidZip, PUMP_VARIANTS } from './offers.js';
 import { demoRequest } from './demo-api.js';
-import { PARTS, PART_BY_ID } from './parts.js';
+import { PARTS, PART_BY_ID, REMOVABLE_PARTS } from './parts.js';
 import { mountViewer } from './viewer.js';
 
 const icons = {
@@ -44,11 +44,13 @@ const applyLocation = document.querySelector('#apply-location');
 const componentSelect = document.querySelector('#component-select');
 const selectionStatus = document.querySelector('#selection-status');
 const content = document.querySelector('#sourcing-content');
+const partReference = document.querySelector('#part-reference');
+const nameplateField = document.querySelector('#nameplate-field');
+const nameplateInput = document.querySelector('#nameplate');
 const dialog = document.querySelector('#checkout');
 const expandedButton = document.querySelector('#expanded');
 const coverButton = document.querySelector('#machine-cover');
 const coverLabel = document.querySelector('#machine-cover-label');
-const coverParts = new Set(['side-panel-left', 'top-panel', 'cup-rail']);
 const toolTabs = [...document.querySelectorAll('.tool-tab')];
 const symptomForm = document.querySelector('#symptom-form');
 const symptomInput = document.querySelector('#symptoms');
@@ -59,9 +61,17 @@ const diagnosisHandoff = document.querySelector('#diagnosis-handoff');
 const diagnoseButton = symptomForm.querySelector('button[type="submit"]');
 const demoMode = document.querySelector('#demo-mode');
 const pumpKey = 'water-pump';
+const catalogUrl = new URL('./RLCSILVIAM_en-US.pdf', import.meta.url).href;
+document.querySelector('#catalog-link').href = catalogUrl;
+for (const [variant, { spec }] of Object.entries(PUMP_VARIANTS)) {
+  nameplateInput.add(new Option(spec, variant));
+}
 
+let sponsorMode = false;
 demoRequest('/status').then(({ mode, configured }) => {
+  sponsorMode = mode === 'live';
   if (mode === 'live') demoMode.textContent = configured ? 'Sponsor demo' : 'Sponsor setup needed';
+  if (selectedPart) renderPartReference(PART_BY_ID[selectedPart]);
 }).catch(() => {
   demoMode.textContent = 'Demo server unavailable';
 });
@@ -109,6 +119,7 @@ let zip = zipInput.value;
 let selectedPart = null;
 let selectedDiagnosis = null;
 let selectedOfferId = null;
+let referenceRequest = 0;
 let offerView;
 let offerRequest = 0;
 let submittingOrder = false;
@@ -138,15 +149,37 @@ function selectPart(part, diagnosisSource = null) {
   if (part !== null && !Object.hasOwn(PART_BY_ID, part)) return;
   const component = PART_BY_ID[part];
   if (component?.inside && !machineOpen) setMachineOpen(true);
-  if (coverParts.has(part) && machineOpen) setMachineOpen(false);
-  if (selectedPart !== part) selectedOfferId = null;
+  if (REMOVABLE_PARTS.has(part) && machineOpen) setMachineOpen(false);
+  const changed = selectedPart !== part;
+  if (changed) selectedOfferId = null;
   selectedPart = part;
   selectedDiagnosis = diagnosisSource;
   componentSelect.value = part ?? '';
   selectionStatus.textContent = component ? `${component.name} selected.` : '';
   viewer.select(part);
+  if (changed) renderPartReference(component);
   if (component) showTool('parts');
   return renderContent();
+}
+
+async function renderPartReference(part) {
+  const request = ++referenceRequest;
+  partReference.hidden = !part;
+  if (!part) return;
+  partReference.innerHTML = `
+    <a href="${catalogUrl}#page=${part.page}" target="_blank" rel="noopener noreferrer">Rancilio catalog · p. ${part.page} ${graphic('external')}</a>
+    <p>${part.partNumbers.join(' · ')}</p>
+    <small role="status"></small>
+  `;
+  if (!sponsorMode) return;
+  const status = partReference.querySelector('small');
+  try {
+    const result = await demoRequest(`/part-evidence?part=${encodeURIComponent(part.id)}`);
+    if (request !== referenceRequest) return;
+    status.textContent = result.partNumbers.length ? `Matched in Cognee · ${result.partNumbers.join(' · ')}` : 'Catalog match unavailable in Cognee';
+  } catch {
+    if (request === referenceRequest) status.textContent = 'Cognee lookup unavailable';
+  }
 }
 
 function renderDiagnosis(result) {
@@ -276,7 +309,7 @@ function renderPartDetail(part) {
       <p class="component-description">${part.description}</p>
       <div class="catalog-status">
         <strong>No sandbox offers for this component</strong>
-        <p>Compare replacements for the seals and internal components.</p>
+        <p>Use the Rancilio catalog reference to identify the part.</p>
       </div>
     </div>
   `;
@@ -291,7 +324,7 @@ function offerCard(offer) {
       <div class="offer-main">
         <div class="offer-line"><span class="offer-name">${escapeHtml(offer.seller)}</span>${offer.recommended ? `<span class="recommended">${graphic('sparkle')}${recommendationLabels[priorityInput.value]}</span>` : ''}</div>
         <div class="offer-meta"><span class="fit ${offer.compatible ? '' : 'fit-no'}">${graphic(offer.compatible ? 'check' : 'close')}${status} · ${escapeHtml(offer.spec)}</span><span class="offer-rating">${graphic('star')}${offer.rating.toFixed(1)} <span>(${offer.reviewCount.toLocaleString('en-US')})</span></span></div>
-        <div class="offer-detail">${graphic('truck')}${escapeHtml(offer.deliveryLabel)}</div>
+      <div class="offer-detail">${graphic('truck')}${escapeHtml(offer.deliveryLabel)}<span>· ${escapeHtml(offer.partNumber)}</span></div>
         ${offer.compatible ? '' : `<div class="offer-reason">${escapeHtml(offer.fitReason)}</div>`}
       </div>
       <div class="offer-price"><strong>${currency.format(offer.total)}</strong><small>with shipping</small></div>
@@ -329,7 +362,7 @@ async function loadOffers(part, request) {
   }
   content.innerHTML = '<p class="request-state" role="status">Loading pump offers…</p>';
   try {
-    const query = new URLSearchParams({ zip, priority });
+    const query = new URLSearchParams({ zip, priority, variant: nameplateInput.value });
     const data = await demoRequest(`/offers?${query}`);
     if (request === offerRequest) renderOffers(part, data.offers, data.source);
   } catch (error) {
@@ -374,7 +407,9 @@ function renderContent() {
   const part = PART_BY_ID[selectedPart];
   const order = ordersByPart.get(selectedPart);
   diagnosisHandoff.hidden = !selectedDiagnosis || Boolean(order);
-  deliveryForm.hidden = !part?.offerKey || Boolean(order);
+  const needsNameplate = part?.offerKey === pumpKey && !isPumpVariant(nameplateInput.value);
+  nameplateField.hidden = part?.offerKey !== pumpKey || Boolean(order);
+  deliveryForm.hidden = !part?.offerKey || Boolean(order) || needsNameplate;
   locationStatus.hidden = deliveryForm.hidden;
   if (!part) {
     renderEmpty();
@@ -382,6 +417,8 @@ function renderContent() {
     renderPartDetail(part);
   } else if (order) {
     renderReceipt(part, order);
+  } else if (needsNameplate) {
+    content.innerHTML = partSummary(part, 'Choose the nameplate to compare compatible pumps.');
   } else {
     return loadOffers(part, request);
   }
@@ -396,6 +433,7 @@ async function openCheckout() {
   if (!offer) return;
   quote = {
     offer, zip, partId: part.id, offerKey: part.offerKey, diagnosisSource: selectedDiagnosis,
+    variant: nameplateInput.value,
     requestId: crypto.randomUUID(),
     rejectedReason: offerView.offers.find((candidate) => !candidate.compatible)?.fitReason,
   };
@@ -408,6 +446,7 @@ async function openCheckout() {
     <p>Review the replacement and delivery details.</p>
     <dl class="receipt-detail">
       <div><dt>Part</dt><dd>${part.name} · ${escapeHtml(offer.partNumber)}</dd></div>
+      ${part.offerKey === pumpKey ? `<div><dt>Machine nameplate</dt><dd>${escapeHtml(offer.spec)}</dd></div>` : ''}
       <div><dt>Seller</dt><dd>${escapeHtml(offer.seller)}</dd></div>
       <div><dt>Delivery to ${escapeHtml(zip)}</dt><dd>${escapeHtml(offer.deliveryLabel)}</dd></div>
       <div><dt>Total with shipping</dt><dd>${currency.format(offer.total)}</dd></div>
@@ -462,7 +501,7 @@ dialog.addEventListener('click', async (event) => {
     try {
       const { offer, zip, offerKey, requestId } = checkout;
       const order = offerKey === pumpKey ? await demoRequest('/orders', {
-        approved: true, offerId: offer.id, zip, requestId,
+        approved: true, offerId: offer.id, zip, requestId, variant: checkout.variant,
         diagnosisSource: checkout.diagnosisSource,
         expectedQuote: { partNumber: offer.partNumber, total: offer.total, deliveryDays: offer.deliveryDays },
       }) : createSandboxOrder(offer, zip, offerKey);
@@ -517,6 +556,10 @@ zipInput.addEventListener('input', () => {
   locationStatus.textContent = '';
 });
 priorityInput.addEventListener('change', () => {
+  selectedOfferId = null;
+  renderContent();
+});
+nameplateInput.addEventListener('change', () => {
   selectedOfferId = null;
   renderContent();
 });

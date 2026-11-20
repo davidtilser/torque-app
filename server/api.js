@@ -1,5 +1,6 @@
 import { diagnoseSymptom } from '../diagnostics.js';
-import { createSandboxOrder, getOffers, isValidZip } from '../offers.js';
+import { PART_BY_ID } from '../parts.js';
+import { createSandboxOrder, getOffers, isPumpVariant, isValidZip } from '../offers.js';
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
 import { PersonaError } from './persona.js';
@@ -45,8 +46,9 @@ function sendJson(res, status, body) {
 }
 
 function readApproval(body) {
-  const { approved, offerId, requestId, zip, expectedQuote, diagnosisSource = null } = body;
+  const { approved, offerId, requestId, zip, variant, expectedQuote, diagnosisSource = null } = body;
   if (approved !== true) throw new ApiError(400, 'Approve the sandbox order to continue.');
+  if (!isPumpVariant(variant)) throw new ApiError(400, 'Select the voltage and frequency from the machine nameplate.');
   if (
     typeof offerId !== 'string' ||
     !offerId ||
@@ -60,7 +62,7 @@ function readApproval(body) {
   ) {
     throw new ApiError(400, 'Review an offer with a valid ZIP before approving.');
   }
-  return { offerId, zip: zip.trim(), requestId, expectedQuote, diagnosisSource };
+  return { offerId, zip: zip.trim(), requestId, variant, expectedQuote, diagnosisSource };
 }
 
 function matchesQuote(offer, quote) {
@@ -68,21 +70,21 @@ function matchesQuote(offer, quote) {
 }
 
 function handleMockApproval(input, mockOrders) {
-  const { offerId, zip, requestId, expectedQuote, diagnosisSource } = input;
+  const { offerId, zip, requestId, variant, expectedQuote, diagnosisSource } = input;
   const existing = mockOrders.get(requestId);
   if (existing) {
-    if (existing.offerId !== offerId || existing.order.zip !== zip || existing.order.diagnosisSource !== diagnosisSource ||
+    if (existing.offerId !== offerId || existing.order.zip !== zip || existing.order.diagnosisSource !== diagnosisSource || existing.variant !== variant ||
       !matchesQuote(existing.offer, expectedQuote)) {
       throw new ApiError(409, 'This approval was already used for a different quote.');
     }
     return existing.order;
   }
 
-  const offer = getOffers(zip, 'fastest', pumpKey).find((candidate) => candidate.id === offerId);
+  const offer = getOffers(zip, 'fastest', pumpKey, variant).find((candidate) => candidate.id === offerId);
   if (!offer?.compatible) throw new ApiError(409, 'Choose a compatible pump before ordering.');
   if (!matchesQuote(offer, expectedQuote)) throw new ApiError(409, 'The quote changed. Review the current offer before approving.');
-  const order = { ...createSandboxOrder(offer, zip, pumpKey), diagnosisSource };
-  mockOrders.set(requestId, { offerId, offer, order });
+  const order = { ...createSandboxOrder(offer, zip, pumpKey, variant), diagnosisSource };
+  mockOrders.set(requestId, { offerId, offer, order, variant });
   return order;
 }
 
@@ -95,6 +97,12 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
 
   function assertConfigured() {
     if (missing.length) throw new ApiError(503, `Configure the live demo in .env.local. Missing: ${missing.join(', ')}.`);
+  }
+
+  function getDiagnosis() {
+    if (!env.COGNEE_API_KEY?.trim()) throw new ApiError(503, 'Set COGNEE_API_KEY in .env.local to query the Silvia M catalog.');
+    diagnosis ??= factories.createLiveDiagnosis(env);
+    return diagnosis;
   }
 
   return async (req, res) => {
@@ -118,22 +126,34 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPump
           return;
         }
 
-        assertConfigured();
         upstream = 'Cognee';
-        diagnosis ??= factories.createLiveDiagnosis(env);
-        sendJson(res, 200, await diagnosis.diagnose(symptom));
+        sendJson(res, 200, await getDiagnosis().diagnose(symptom));
+        return;
+      }
+
+      if (route === 'GET /part-evidence') {
+        const part = url.searchParams.get('part');
+        if (!Object.hasOwn(PART_BY_ID, part)) throw new ApiError(404, 'Unknown Silvia M component.');
+        if (!isLive) {
+          sendJson(res, 200, { partId: part, partNumbers: [], source: 'catalog' });
+          return;
+        }
+        upstream = 'Cognee';
+        sendJson(res, 200, { ...await getDiagnosis().lookupPart(part), source: 'cognee' });
         return;
       }
 
       if (route === 'GET /offers') {
         const zip = url.searchParams.get('zip');
         const priority = url.searchParams.get('priority') ?? 'fastest';
+        const variant = url.searchParams.get('variant');
+        if (!isPumpVariant(variant)) throw new ApiError(400, 'Select the voltage and frequency from the machine nameplate.');
         if (!isValidZip(zip)) throw new ApiError(400, 'Enter a valid five-digit ZIP code.');
         if (!priorities.has(priority)) throw new ApiError(400, 'Choose a supported ranking priority.');
         assertConfigured();
         upstream = 'SingleStore';
         if (isLive) store ??= factories.createPumpStore(env);
-        const offers = isLive ? await store.getOffers(zip, priority) : getOffers(zip, priority, pumpKey);
+        const offers = isLive ? await store.getOffers(zip, priority, variant) : getOffers(zip, priority, pumpKey, variant);
         sendJson(res, 200, { offers, source: isLive ? 'singlestore' : 'mock' });
         return;
       }

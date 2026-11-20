@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import singlestore from 'singlestore-nodejs/promise';
-import { getCatalog, isValidZip, quoteCatalog } from '../offers.js';
+import { getCatalog, isPumpVariant, isValidZip, pumpListings, quoteCatalog } from '../offers.js';
 import { createPersonaVerifier } from './persona.js';
 
-const pumpFixtures = getCatalog('water-pump');
+const pumpKey = 'water-pump';
+const pumpListingIds = pumpListings.map(({ id }) => id);
+const catalogPlaceholders = pumpListingIds.map(() => '?').join(', ');
 
 const catalogColumns = `
   offer_id AS id, seller, title, part_number AS partNumber, spec,
@@ -114,7 +116,7 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
       }
     }
 
-    for (const listing of pumpFixtures.listings) {
+    for (const listing of pumpListings) {
       await pool.execute(`
         INSERT IGNORE INTO torque_pump_offers
           (offer_id, seller, title, part_number, spec, price_cents,
@@ -135,19 +137,21 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
     return initialization;
   }
 
-  function quotes(listings, zip, priority) {
+  function quotes(listings, zip, priority, catalog) {
     return quoteCatalog({
-      partNumber: pumpFixtures.partNumber,
-      mismatch: pumpFixtures.mismatch,
+      ...catalog,
       listings: listings.map((listing) => ({ ...listing, rating: Number(listing.rating) })),
     }, zip, priority);
   }
 
-  async function getOffers(zip, priority) {
+  async function getOffers(zip, priority, variant) {
     if (!isValidZip(zip)) throw storeError(400, 'Enter a five-digit ZIP code.');
+    if (!isPumpVariant(variant)) throw storeError(400, 'Choose a Silvia M nameplate variant.');
     await seed();
-    const [listings] = await pool.execute(`SELECT ${catalogColumns} FROM torque_pump_offers`);
-    return quotes(listings, zip, priority);
+    const [listings] = await pool.execute(
+      `SELECT ${catalogColumns} FROM torque_pump_offers WHERE offer_id IN (${catalogPlaceholders})`, pumpListingIds,
+    );
+    return quotes(listings, zip, priority, getCatalog(pumpKey, variant));
   }
 
   async function readOrder(requestId, offerId, zip, expectedQuote, diagnosisSource) {
@@ -164,7 +168,7 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
     return order;
   }
 
-  async function createOrder({ offerId, zip, requestId, expectedQuote, diagnosisSource = null }) {
+  async function createOrder({ offerId, zip, requestId, variant, expectedQuote, diagnosisSource = null }) {
     if (!isValidZip(zip)) throw storeError(400, 'Enter a five-digit ZIP code.');
     if (typeof offerId !== 'string' || !/^[a-z\d_-]{1,64}$/i.test(offerId)) {
       throw storeError(400, 'Choose a replacement pump offer.');
@@ -177,13 +181,19 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
       throw storeError(400, 'Review the pump quote before approving.');
     }
 
+    const catalog = getCatalog(pumpKey, variant);
+    if (!catalog) throw storeError(400, 'Choose a Silvia M nameplate variant.');
+    if (!pumpListingIds.includes(offerId) || expectedQuote.partNumber !== catalog.partNumber) {
+      throw storeError(409, 'This pump offer does not match the selected Silvia M nameplate.');
+    }
+
     const deliveryZip = zip.trim();
     await seed();
     const existing = await readOrder(requestId, offerId, deliveryZip, expectedQuote, diagnosisSource);
     if (existing) return existing;
 
     const [listings] = await pool.execute(`SELECT ${catalogColumns} FROM torque_pump_offers WHERE offer_id = ?`, [offerId]);
-    const [offer] = quotes(listings, deliveryZip, 'fastest');
+    const [offer] = quotes(listings, deliveryZip, 'fastest', catalog);
     if (!offer?.compatible) throw storeError(409, 'This pump offer does not fit the machine.');
     if (!sameQuote(expectedQuote, offer)) throw storeError(409, 'This quote has changed. Review the current pump offer before approving.');
 
@@ -203,7 +213,7 @@ export function createPumpStore(env, { pool = openPool(env), verifyTechnician = 
         WHERE offer_id = ? AND part_number = ? AND price_cents + shipping_cents = ? AND base_delivery_days = ?
       `, [
         requestId, orderId, deliveryZip, offer.deliveryDays, offer.deliveryLabel,
-        offer.fitReason, pumpFixtures.mismatch, diagnosisSource, personaStatus, placedAt,
+        offer.fitReason, catalog.mismatch, diagnosisSource, personaStatus, placedAt,
         offer.id, offer.partNumber, totalCents, listings[0].deliveryDays,
       ]);
       quoteChanged = insert.affectedRows === 0;

@@ -249,3 +249,17 @@ dialog h2 { font-size: 23px; letter-spacing: -0.045em; }
   .header-inner { gap: 8px; }
   .header-divider, .header-location, .component-count { display: none; }
 }
+
+.nameplate-input { margin-bottom: 11px; }
+.nameplate-input p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.catalog-reference {
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, #373d42);
+  color: var(--muted);
+  font-size: 11px;
+}
+.catalog-reference a { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
+.catalog-reference p { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.catalog-reference small { display: block; margin-top: 3px; font-size: inherit; }
+.catalog-reference small:empty { display: none; }
