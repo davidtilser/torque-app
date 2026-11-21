@@ -161,7 +161,7 @@ test('live checkout requires Persona approval and persists it with the sandbox o
   personaStatus = 'declined';
   const replay = await request(api, 'POST', '/orders', purchase);
   assert.deepEqual(replay.data, order);
-  assert.deepEqual(calls, ['Cognee', 'Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
+  assert.deepEqual(calls, ['Cognee', 'Cognee', 'Cognee', 'Cognee', 'SingleStore read', 'Persona Sandbox', 'Persona Sandbox', 'SingleStore sandbox write']);
 });
 
 test('the agent can submit a non-pump part order and rejects a mismatched variant', async () => {

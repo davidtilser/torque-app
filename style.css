@@ -274,3 +274,8 @@ dialog h2 { font-size: 23px; letter-spacing: -0.045em; }
 .fault-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .fault-dot-secondary { margin-left: 10px; background: #ffb020; }
 .fault-dot-primary { background: #ff3b30; }
+
+.persona-check { display: grid; justify-items: center; gap: 8px; text-align: center; padding: 12px 0; }
+.persona-check canvas { background: #fff; border-radius: 8px; }
+.persona-status { font-weight: 600; }
+.cause-evidence { font-size: 0.78rem; opacity: 0.75; }

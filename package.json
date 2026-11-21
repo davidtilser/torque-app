@@ -11,6 +11,7 @@
     "seed:demo": "node --env-file-if-exists=.env.local server/seed.js"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "singlestore-nodejs": "1.0.1",
     "three": "0.186.1"
   },

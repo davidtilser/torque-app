@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import { isPumpVariant, isValidZip, PUMP_VARIANTS } from './offers.js';
 import { demoRequest } from './demo-api.js';
 import { PARTS, PART_BY_ID, REMOVABLE_PARTS, VARIANT_NAMES } from './parts.js';
@@ -209,6 +210,7 @@ function renderDiagnosis(result) {
           <article class="cause">
             <h4>${escapeHtml(cause.title)}</h4>
             <p>${escapeHtml(cause.description)}</p>
+            ${cause.evidence?.length ? `<p class="cause-evidence">Catalog match in Cognee: ${cause.evidence.map(escapeHtml).join(' · ')}</p>` : ''}
             <div class="cause-actions">
               ${cause.partIds.filter((id) => Object.hasOwn(PART_BY_ID, id)).map((id) => `
                 <button type="button" data-diagnose-part="${id}">${graphic('cube')} Inspect ${PART_BY_ID[id].name.toLowerCase()} ${graphic('chevron')}</button>
@@ -478,7 +480,7 @@ async function openCheckout() {
       <div><dt>Delivery to ${escapeHtml(zip)}</dt><dd>${escapeHtml(offer.deliveryLabel)}</dd></div>
       <div><dt>Total with shipping</dt><dd>${currency.format(offer.total)}</dd></div>
     </dl>
-    ${offerView.source === 'singlestore' ? '<p>Persona Sandbox checks the demo technician when you approve.</p>' : ''}
+    ${offerView.source === 'singlestore' ? '<p>When you approve, Persona asks for a live selfie before the order is placed.</p>' : ''}
     <p class="checkout-sandbox">${graphic('shield')} Sandbox order · No payment will be taken</p>
     <p class="checkout-error" role="alert" hidden></p>
     <div class="dialog-buttons">
@@ -527,8 +529,10 @@ dialog.addEventListener('click', async (event) => {
     message.hidden = true;
     try {
       const { offer, zip, partId, requestId, variant } = checkout;
+      const inquiryId = offerView?.source === 'singlestore' ? await verifyWithPersona(requestId, submit) : undefined;
+      submit.textContent = 'Placing order…';
       const order = await demoRequest('/orders', {
-        approved: true, offerId: offer.id, zip, partId, requestId, variant,
+        approved: true, offerId: offer.id, zip, partId, requestId, variant, inquiryId,
         diagnosisSource: checkout.diagnosisSource,
         expectedQuote: { partNumber: offer.partNumber, total: offer.total, deliveryDays: offer.deliveryDays },
       });
@@ -547,6 +551,38 @@ dialog.addEventListener('click', async (event) => {
     renderContent();
   }
 });
+
+// Starts a fresh Persona selfie check for this order and waits until the technician finishes it.
+async function verifyWithPersona(requestId, submit) {
+  dialog.querySelector('.persona-check')?.remove();
+  submit.textContent = 'Starting Persona check…';
+  const { inquiryId, url } = await demoRequest('/verification', { requestId });
+  const panel = document.createElement('div');
+  panel.className = 'persona-check';
+  panel.innerHTML = `
+    <h3>Verify it’s you</h3>
+    <p>Scan with your phone, or open the link, and take the Persona selfie. The order is placed when Persona confirms.</p>
+    <canvas aria-label="QR code for the Persona check"></canvas>
+    <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open Persona check ${graphic('external')}</a>
+    <p class="persona-status" role="status">Waiting for your selfie…</p>
+  `;
+  dialog.querySelector('.dialog-buttons').before(panel);
+  await QRCode.toCanvas(panel.querySelector('canvas'), url, { width: 180, margin: 1 });
+  submit.textContent = 'Waiting for Persona…';
+  const statusLine = panel.querySelector('.persona-status');
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline && dialog.open) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const { status } = await demoRequest(`/verification?id=${encodeURIComponent(inquiryId)}`);
+    if (['completed', 'approved'].includes(status)) {
+      statusLine.textContent = 'Persona verified you ✓';
+      return inquiryId;
+    }
+    if (['failed', 'declined', 'expired'].includes(status)) throw new Error(`Persona check ${status}. Approve again to retry.`);
+    statusLine.textContent = status === 'pending' ? 'Persona is checking your selfie…' : 'Waiting for your selfie…';
+  }
+  throw new Error('The Persona check timed out. Approve again to retry.');
+}
 
 componentSelect.addEventListener('change', () => {
   selectPart(componentSelect.value || null);

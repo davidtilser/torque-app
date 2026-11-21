@@ -3,7 +3,7 @@ import { PART_BY_ID } from '../parts.js';
 import { createSandboxOrder, getCatalog, getOffers, isValidZip } from '../offers.js';
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
-import { PersonaError } from './persona.js';
+import { PersonaError, createPersonaSessions } from './persona.js';
 import { createPartsStore } from './singlestore.js';
 
 const pumpKey = 'water-pump';
@@ -56,7 +56,7 @@ function requireCatalog(partId, variant) {
 }
 
 function readApproval(body) {
-  const { approved, offerId, requestId, zip, partId = pumpKey, variant, expectedQuote, diagnosisSource = null } = body;
+  const { approved, offerId, requestId, zip, partId = pumpKey, variant, expectedQuote, diagnosisSource = null, inquiryId } = body;
   if (approved !== true) throw new ApiError(400, 'Approve the sandbox order to continue.');
   const catalog = requireCatalog(partId, variant);
   if (
@@ -68,14 +68,15 @@ function readApproval(body) {
     ![null, 'live', 'mock'].includes(diagnosisSource) ||
     typeof expectedQuote?.partNumber !== 'string' ||
     !Number.isFinite(expectedQuote.total) ||
-    !Number.isInteger(expectedQuote.deliveryDays)
+    !Number.isInteger(expectedQuote.deliveryDays) ||
+    (inquiryId !== undefined && !/^inq_[a-z0-9]+$/i.test(inquiryId))
   ) {
     throw new ApiError(400, 'Review an offer with a valid ZIP before approving.');
   }
   if (expectedQuote.partNumber !== catalog.partNumber) {
     throw new ApiError(409, 'Review an offer for the selected catalog part.');
   }
-  return { offerId, zip: zip.trim(), requestId, partId, variant, expectedQuote, diagnosisSource };
+  return { offerId, zip: zip.trim(), requestId, partId, variant, expectedQuote, diagnosisSource, inquiryId };
 }
 
 function matchesQuote(offer, quote) {
@@ -113,6 +114,7 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPart
   const mockOrders = new Map();
   let diagnosis;
   let store;
+  let personaSessions;
 
   function assertConfigured() {
     if (missing.length) throw new ApiError(503, `Configure the live demo in .env.local. Missing: ${missing.join(', ')}.`);
@@ -175,6 +177,20 @@ export function createDemoApi(env, factories = { createLiveDiagnosis, createPart
         if (isLive) store ??= factories.createPartsStore(env);
         const offers = isLive ? await store.getOffers(zip, priority, partId, variant) : getOffers(zip, priority, partId, variant);
         sendJson(res, 200, { offers, source: isLive ? 'singlestore' : 'mock' });
+        return;
+      }
+
+      if (route === 'POST /verification' || route === 'GET /verification') {
+        if (!isLive) throw new ApiError(404, 'Persona checks run in live mode only.');
+        upstream = 'Persona';
+        personaSessions ??= createPersonaSessions(env);
+        if (req.method === 'POST') {
+          const { requestId } = await readBody(req);
+          if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) throw new ApiError(400, 'Review an offer before verifying.');
+          sendJson(res, 200, await personaSessions.start(requestId));
+        } else {
+          sendJson(res, 200, { status: await personaSessions.status(url.searchParams.get('id')) });
+        }
         return;
       }
 

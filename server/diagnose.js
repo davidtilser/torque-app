@@ -78,31 +78,29 @@ export function createLiveDiagnosis(env = process.env, { fetch: fetcher = global
     return { dataset, partIds };
   }
 
+  // Every suspect part is checked against the catalog in Cognee; only parts whose
+  // manufacturer numbers Cognee returns are offered as grounded causes.
   async function diagnose(symptom) {
     const result = diagnoseSymptom(symptom);
-    if (!result.causes.some(({ partIds }) => partIds.includes('water-pump'))) {
-      return { ...result, source: 'mock' };
-    }
+    if (result.status !== 'matched' || !result.causes.length) return { ...result, source: 'mock' };
 
-    const { partIds } = await seed();
+    const ids = [...new Set(result.causes.flatMap(({ partIds }) => partIds))].filter((id) => PART_BY_ID[id]?.partNumbers?.length);
+    const lookups = await Promise.all(ids.map((id) => lookupPart(id)));
+    const confirmed = new Map(lookups.filter(({ partNumbers }) => partNumbers.length).map(({ partId, partNumbers }) => [partId, partNumbers]));
+    const causes = result.causes
+      .map((cause) => ({ ...cause, partIds: cause.partIds.filter((id) => confirmed.has(id)) }))
+      .filter((cause) => cause.partIds.length)
+      .map((cause) => ({
+        ...cause,
+        evidence: cause.partIds.map((id) => `${PART_BY_ID[id].name}: ${confirmed.get(id).join(', ')} (catalog p. ${PART_BY_ID[id].page})`),
+      }));
+    if (!causes.length) return { ...result, source: 'mock' };
+
     return {
+      ...result,
       source: 'live',
-      status: 'matched',
-      summary: 'Check the water path before choosing a replacement.',
-      clarification: null,
-      causes: partIds.map((id) => ({
-        title: PART_BY_ID[id].name,
-        description: {
-          'inlet-hose': 'A low reservoir or a restricted hose can starve the pump and make it sound louder.',
-          'water-pump': 'If the reservoir is full and the brew group still has no flow, the pump is a candidate for inspection.',
-          'solenoid-valve': 'If water runs into the drip tray during brewing, have the three-way valve checked.',
-        }[id],
-        partIds: [id],
-      })),
-      checks: [
-        ...result.checks,
-        'Have a qualified technician confirm the faulty part before replacement.',
-      ],
+      causes,
+      checks: [...result.checks, 'Have a qualified technician confirm the faulty part before replacement.'],
     };
   }
 

@@ -166,7 +166,7 @@ export function createPartsStore(env, { pool = openPool(env), verifyTechnician =
     return order;
   }
 
-  async function createOrder({ offerId, zip, requestId, partId, variant, expectedQuote, diagnosisSource = null }) {
+  async function createOrder({ offerId, zip, requestId, partId, variant, expectedQuote, diagnosisSource = null, inquiryId }) {
     if (!isValidZip(zip)) throw storeError(400, 'Enter a five-digit ZIP code.');
     if (typeof offerId !== 'string' || !/^[a-z\d_-]{1,64}$/i.test(offerId)) {
       throw storeError(400, 'Choose a replacement offer.');
@@ -195,7 +195,7 @@ export function createPartsStore(env, { pool = openPool(env), verifyTechnician =
     if (!offer?.compatible) throw storeError(409, 'This offer does not match the selected replacement.');
     if (!sameQuote(expectedQuote, offer)) throw storeError(409, 'This quote has changed. Review the current offer before approving.');
 
-    const personaStatus = await verifyTechnician();
+    const personaStatus = await verifyTechnician(inquiryId);
 
     const orderId = `SBX-${randomUUID().slice(0, 8).toUpperCase()}`;
     const placedAt = new Date().toISOString();
