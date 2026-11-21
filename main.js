@@ -396,6 +396,13 @@ async function loadOffers(part, request, variant) {
   }
 }
 
+function supplierLabel(status) {
+  if (status === 'submitted') return 'Order sent to the seller';
+  if (status === 'not_connected') return 'Seller ordering API not connected yet: order held for you to place with the seller';
+  if (status === 'unreachable') return 'Could not reach the seller’s ordering API: order held for you to place';
+  return `Seller’s ordering API refused the order (${status.replace('rejected_', 'HTTP ')}): order held`;
+}
+
 function renderReceipt(part, order) {
   const diagnosis = order.diagnosisSource === 'live' ? ' from a Cognee-backed diagnosis'
     : order.diagnosisSource === 'mock' ? ' from a mock diagnosis' : '';
@@ -408,6 +415,8 @@ function renderReceipt(part, order) {
         <div><dt>Part</dt><dd>${escapeHtml(order.title)} · ${escapeHtml(order.partNumber)}</dd></div>
         <div><dt>Delivery to ${escapeHtml(order.zip)}</dt><dd>${escapeHtml(order.deliveryLabel)}</dd></div>
         <div><dt>Total</dt><dd>${currency.format(order.total)}</dd></div>
+        ${order.paymentRef ? `<div><dt>Payment</dt><dd>Test hold ${escapeHtml(order.paymentRef)} · not charged</dd></div>` : ''}
+        ${order.supplierStatus ? `<div><dt>Supplier</dt><dd>${escapeHtml(supplierLabel(order.supplierStatus))}</dd></div>` : ''}
       </dl>
       <details class="audit">
         <summary>${graphic('list')} Order audit trail</summary>
@@ -416,8 +425,10 @@ function renderReceipt(part, order) {
           <li>${escapeHtml(order.fitReason)}</li>
           ${order.rejectedReason ? `<li>Excluded offer. ${escapeHtml(order.rejectedReason)}</li>` : ''}
           <li>Compared delivered price, ETA, and seller reviews for ZIP ${escapeHtml(order.zip)}.</li>
-          ${order.personaStatus === 'approved' ? '<li>Persona Sandbox confirmed the demo technician’s approved verification.</li>' : ''}
-          <li>You approved the sandbox order for ${currency.format(order.total)}.</li>
+          <li>You approved the order for ${currency.format(order.total)}.</li>
+          ${['approved', 'completed'].includes(order.personaStatus) ? '<li>Persona verified the technician with a live selfie for this order.</li>' : ''}
+          ${order.paymentRef ? `<li>Payment held in test mode (${escapeHtml(order.paymentRef)}). No card was charged.</li>` : ''}
+          ${order.supplierStatus ? `<li>${escapeHtml(supplierLabel(order.supplierStatus))}.</li>` : ''}
         </ol>
       </details>
       <button type="button" class="button button-secondary" data-action="compare">Compare offers again ${graphic('arrow')}</button>

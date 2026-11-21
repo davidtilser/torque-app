@@ -1,6 +1,7 @@
 import { diagnoseSymptom } from '../diagnostics.js';
 import { PART_BY_ID } from '../parts.js';
 import { createSandboxOrder, getCatalog, getOffers, isValidZip } from '../offers.js';
+import { authorizePayment } from './checkout.js';
 import { getDemoConfig } from './config.js';
 import { createLiveDiagnosis } from './diagnose.js';
 import { PersonaError, createPersonaSessions } from './persona.js';
@@ -103,6 +104,8 @@ function handleMockApproval(input, mockOrders) {
     diagnosisSource,
     fitReason: offer.fitReason,
     rejectedReason: getCatalog(partId, variant).mismatch,
+    paymentRef: authorizePayment(Math.round(offer.total * 100)).paymentRef,
+    supplierStatus: 'not_connected',
   };
   mockOrders.set(requestId, { offerId, offer, order, partId });
   return order;

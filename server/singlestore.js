@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import singlestore from 'singlestore-nodejs/promise';
 import { catalogListings, getCatalog, isValidZip, quoteCatalog } from '../offers.js';
+import { authorizePayment, createSupplierClient } from './checkout.js';
 import { createPersonaVerifier } from './persona.js';
 
 const catalogColumns = `
@@ -62,10 +63,12 @@ function receipt(row) {
     rejectedReason: row.rejected_reason,
     diagnosisSource: row.diagnosis_source,
     personaStatus: row.persona_status,
+    paymentRef: row.payment_ref,
+    supplierStatus: row.supplier_status,
   };
 }
 
-export function createPartsStore(env, { pool = openPool(env), verifyTechnician = createPersonaVerifier(env) } = {}) {
+export function createPartsStore(env, { pool = openPool(env), verifyTechnician = createPersonaVerifier(env), submitOrder = createSupplierClient(env) } = {}) {
   let initialization;
 
   async function initialize() {
@@ -103,10 +106,11 @@ export function createPartsStore(env, { pool = openPool(env), verifyTechnician =
       )
     `);
 
-    const [personaColumn] = await pool.query(`SHOW COLUMNS FROM torque_pump_orders LIKE 'persona\\_status'`);
-    if (personaColumn.length === 0) {
+    for (const [column, type] of [['persona_status', 'VARCHAR(16)'], ['payment_ref', 'VARCHAR(24)'], ['supplier_status', 'VARCHAR(24)']]) {
+      const [existing] = await pool.query(`SHOW COLUMNS FROM torque_pump_orders LIKE '${column}'`);
+      if (existing.length) continue;
       try {
-        await pool.query('ALTER TABLE torque_pump_orders ADD COLUMN persona_status VARCHAR(16)');
+        await pool.query(`ALTER TABLE torque_pump_orders ADD COLUMN ${column} ${type}`);
       } catch (error) {
         if (error.errno !== 1060 && error.code !== 'ER_DUP_FIELDNAME') throw error;
       }
@@ -200,18 +204,22 @@ export function createPartsStore(env, { pool = openPool(env), verifyTechnician =
     const orderId = `SBX-${randomUUID().slice(0, 8).toUpperCase()}`;
     const placedAt = new Date().toISOString();
     const totalCents = Math.round(offer.total * 100);
+    const { paymentRef } = authorizePayment(totalCents);
+    const supplierStatus = await submitOrder({
+      orderId, paymentRef, seller: offer.seller, partNumber: offer.partNumber, quantity: 1, totalCents, shipToZip: deliveryZip,
+    });
     let quoteChanged = false;
     try {
       const [insert] = await pool.execute(`
         INSERT INTO torque_pump_orders
           (request_id, order_id, offer_id, seller, title, part_number,
-           total_cents, zip, delivery_days, delivery_label, fit_reason, rejected_reason, diagnosis_source, persona_status, placed_at)
-        SELECT ?, ?, offer_id, seller, title, part_number, price_cents + shipping_cents, ?, ?, ?, ?, ?, ?, ?, ?
+           total_cents, zip, delivery_days, delivery_label, fit_reason, rejected_reason, diagnosis_source, persona_status, placed_at, payment_ref, supplier_status)
+        SELECT ?, ?, offer_id, seller, title, part_number, price_cents + shipping_cents, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         FROM torque_pump_offers
         WHERE offer_id = ? AND part_number = ? AND price_cents + shipping_cents = ? AND base_delivery_days = ?
       `, [
         requestId, orderId, deliveryZip, offer.deliveryDays, offer.deliveryLabel,
-        offer.fitReason, catalog.mismatch, diagnosisSource, personaStatus, placedAt,
+        offer.fitReason, catalog.mismatch, diagnosisSource, personaStatus, placedAt, paymentRef, supplierStatus,
         offer.id, offer.partNumber, totalCents, listings[0].deliveryDays,
       ]);
       quoteChanged = insert.affectedRows === 0;

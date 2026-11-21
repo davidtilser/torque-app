@@ -89,11 +89,12 @@ test('live checkout requires Persona approval and persists it with the sandbox o
       if (sql.includes('FROM torque_pump_orders')) return [saved?.request_id === params[0] ? [saved] : []];
       if (sql.includes('INSERT INTO torque_pump_orders')) {
         calls.push('SingleStore sandbox write');
-        const [requestId, orderId, zip, deliveryDays, delivery, fit, rejected, diagnosis, persona, placed, offerId, partNumber, totalCents] = params;
+        const [requestId, orderId, zip, deliveryDays, delivery, fit, rejected, diagnosis, persona, placed, paymentRef, supplierStatus, offerId, partNumber, totalCents] = params;
         saved = {
           request_id: requestId, order_id: orderId, offer_id: offerId, zip,
           delivery_days: deliveryDays, delivery_label: delivery, fit_reason: fit, rejected_reason: rejected,
           diagnosis_source: diagnosis, persona_status: persona, placed_at: placed,
+          payment_ref: paymentRef, supplier_status: supplierStatus,
           part_number: partNumber, total_cents: totalCents,
         };
         return [{ affectedRows: 1 }];
