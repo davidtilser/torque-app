@@ -1,36 +1,38 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PART_BY_ID, REMOVABLE_PARTS } from './parts.js';
 import { createSilviaModel } from './silvia-model.js';
+
+// Catalog position numbers (Rancilio RLCSILVIAM v.22, pages 6–9) shown as callouts in the exploded view.
+const CALLOUTS = {
+  'inlet-hose': '1', 'brew-thermostat': '3', 'steam-thermostat': '4', 'steam-valve': '8', 'steam-wand': '14',
+  'expansion-valve': '17', 'heating-element': '26', 'water-pump': '23', boiler: '28',
+};
+const PAPER = 0xfbfaf6;
+const INK = 0x1d1d1b;
+
+// Turns the model into a catalog-style line drawing: flat light surfaces with black edge lines.
+function applyDrawingStyle(root) {
+  const fills = new Map();
+  const ink = new THREE.LineBasicMaterial({ color: INK });
+  const meshes = [];
+  root.traverse((object) => { if (object.isMesh) meshes.push(object); });
+  for (const mesh of meshes) {
+    const old = mesh.material;
+    const tone = old.color ? old.color.getHSL({}).l : 0.8;
+    const shade = tone < 0.2 ? 0xd9d8d4 : tone < 0.5 ? 0xeceae5 : 0xffffff;
+    if (!fills.has(shade)) fills.set(shade, new THREE.MeshLambertMaterial({ color: shade, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+    mesh.material = fills.get(shade);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 28), ink);
+    edges.raycast = () => {};
+    mesh.add(edges);
+  }
+}
 
 const cameraHome = new THREE.Vector3(4.3, 3.7, 7.3);
 const targetHome = new THREE.Vector3(0, 1.79, 0.25);
 const cameraCutaway = new THREE.Vector3(-7.1, 4.9, 4.75);
 const targetCutaway = new THREE.Vector3(-0.18, 1.73, -0.14);
-
-function makeFloorShadow() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const surface = canvas.getContext('2d');
-  const gradient = surface.createRadialGradient(64, 64, 1, 64, 64, 64);
-  gradient.addColorStop(0, 'rgba(43, 29, 20, 0.45)');
-  gradient.addColorStop(0.52, 'rgba(43, 29, 20, 0.19)');
-  gradient.addColorStop(1, 'rgba(43, 29, 20, 0)');
-  surface.fillStyle = gradient;
-  surface.fillRect(0, 0, 128, 128);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(6.5, 4.8),
-    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0.003, 0.09);
-  return floor;
-}
 
 export function mountViewer(container, { onSelect, onAvailability } = {}) {
   let active = null;
@@ -103,6 +105,9 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
 
   function setExpanded(value) {
     expanded = value;
+    if (!opened) return;
+    const position = expanded ? cameraCutaway.clone().sub(targetCutaway).multiplyScalar(1.35).add(targetCutaway).add(new THREE.Vector3(0, 0.5, 0)) : cameraCutaway;
+    transitionView(position, expanded ? targetCutaway.clone().add(new THREE.Vector3(0, 0.45, 0)) : targetCutaway);
   }
 
   function refreshVisibleComponents() {
@@ -144,8 +149,7 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
   renderer.domElement.setAttribute('aria-hidden', 'true');
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMapping = THREE.NoToneMapping;
   container.prepend(renderer.domElement);
 
   hotspot = document.createElement('button');
@@ -163,19 +167,37 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
   const assembly = createSilviaModel();
   scene.add(assembly.group);
   container.dataset.asset = 'silvia-m';
-  const studio = new RoomEnvironment();
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(studio, 0.04).texture;
-  scene.environmentIntensity = 0.86;
-  studio.dispose();
-  pmrem.dispose();
+  scene.background = new THREE.Color(PAPER);
+  applyDrawingStyle(assembly.group);
 
-  const fill = new THREE.HemisphereLight(0xfff4e3, 0xaaa7a0, 1.38);
-  const key = new THREE.DirectionalLight(0xfff7ec, 2.26);
+  const fill = new THREE.HemisphereLight(0xffffff, 0xdedcd6, 2.2);
+  const key = new THREE.DirectionalLight(0xffffff, 0.9);
   key.position.set(-2, 5, 4);
-  const rim = new THREE.DirectionalLight(0xf2f4ff, 1.6);
-  rim.position.set(3, 3, -4);
-  scene.add(key, fill, rim, makeFloorShadow());
+  scene.add(key, fill);
+
+  // Dash-dot assembly lines from each exploded part back to where it fits, as in the catalog.
+  const assemblyInk = new THREE.LineDashedMaterial({ color: INK, dashSize: 9, gapSize: 4, transparent: true, opacity: 0.7 });
+  const assemblyLines = assembly.exploded.map(({ object, normal }) => {
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([normal.clone(), normal.clone()]), assemblyInk);
+    line.raycast = () => {};
+    line.visible = false;
+    object.parent.add(line);
+    return { line, object, normal };
+  });
+
+  // Numbered callouts with leader lines, drawn in an SVG layer over the canvas.
+  const calloutLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  calloutLayer.classList.add('viewer-callouts');
+  calloutLayer.setAttribute('aria-hidden', 'true');
+  container.append(calloutLayer);
+  const callouts = assembly.exploded.filter(({ id }) => CALLOUTS[id]).map(({ id, object }) => {
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.innerHTML = `<line></line><text>${CALLOUTS[id]}</text>`;
+    calloutLayer.append(group);
+    return { id, object, group, leader: group.querySelector('line'), label: group.querySelector('text') };
+  });
+  const box = new THREE.Box3();
+  const center = new THREE.Vector3();
 
   const camera = new THREE.PerspectiveCamera(33, 1, 0.07, 65);
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -285,8 +307,33 @@ export function mountViewer(container, { onSelect, onAvailability } = {}) {
       object.position.y = THREE.MathUtils.lerp(object.position.y, normal.y + offset.y * amount, 0.16);
       object.position.z = THREE.MathUtils.lerp(object.position.z, normal.z + offset.z * amount, 0.16);
     }
+    for (const { line, object, normal } of assemblyLines) {
+      const points = line.geometry.attributes.position;
+      points.setXYZ(1, object.position.x, object.position.y, object.position.z);
+      points.needsUpdate = true;
+      line.computeLineDistances();
+      line.visible = expanded && object.visible && object.position.distanceTo(normal) > 4;
+    }
     camera.updateMatrixWorld();
     renderer.render(scene, camera);
+    for (const { object, group, leader, label } of callouts) {
+      const show = expanded && opened && object.visible;
+      group.style.display = show ? '' : 'none';
+      if (!show) continue;
+      box.setFromObject(object).getCenter(center).project(camera);
+      const x = (center.x + 1) * width / 2;
+      const y = (1 - center.y) * height / 2;
+      const dx = x - width / 2;
+      const dy = y - height / 2;
+      const length = Math.hypot(dx, dy) || 1;
+      const lx = x + dx / length * 46;
+      const ly = y + dy / length * 46;
+      leader.setAttribute('x1', x); leader.setAttribute('y1', y);
+      leader.setAttribute('x2', lx); leader.setAttribute('y2', ly);
+      label.setAttribute('x', lx + (dx < 0 ? -4 : 4));
+      label.setAttribute('y', ly + 4);
+      label.setAttribute('text-anchor', dx < 0 ? 'end' : 'start');
+    }
     assembly.sealAnchor.getWorldPosition(projected).project(camera);
     const frontFacing = camera.position.z >= -0.65;
     const onScreen = Math.abs(projected.x) < 0.94 && Math.abs(projected.y) < 0.87 && projected.z < 1;

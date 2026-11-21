@@ -190,13 +190,16 @@ export function createSilviaModel() {
   return {
     group, internals, components, sealAnchor,
     exploded: [
-      ['portafilter', [0, -55, 47]], ['seal', [0, -14, 0]], ['shower-screen', [0, -30, 14]],
-      ['drip-grate', [0, 13, 22]], ['drip-tray', [0, 0, 26]],
-      ['water-tank', [0, 72, 0]], ['boiler', [13, 30, 0]],
-      ['water-pump', [-43, -9, 22]], ['heating-element', [10, -31, 10]],
-    ].map(([id, offset]) => {
+      ['portafilter', [0, -70, 90]], ['seal', [0, -28, 30]], ['shower-screen', [0, -50, 55]],
+      ['drip-grate', [0, 22, 60]], ['drip-tray', [0, 0, 95]],
+      ['water-tank', [0, 120, -20]], ['tank-lid', [0, 170, -20]], ['boiler', [25, 70, 0]],
+      ['water-pump', [-90, -15, 45]], ['heating-element', [25, -60, 0]],
+      ['brew-thermostat', [-45, 95, 10]], ['steam-thermostat', [50, 95, 10]],
+      ['solenoid-valve', [-60, 30, 50]], ['expansion-valve', [-75, 40, -20]],
+      ['steam-valve', [70, 40, 40]], ['steam-wand', [90, -20, 60]], ['inlet-hose', [-70, 40, -60]],
+    ].filter(([id]) => components.has(id)).map(([id, offset]) => {
       const object = components.get(id);
-      return { object, normal: object.position.clone(), offset: new THREE.Vector3(...offset) };
+      return { id, object, normal: object.position.clone(), offset: new THREE.Vector3(...offset) };
     }),
   };
 }
